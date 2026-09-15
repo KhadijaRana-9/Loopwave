@@ -1,0 +1,25 @@
+import type { Request, Response } from 'express'
+import { campaignsService } from '@/services/campaigns.service.js'
+import { asyncHandler } from '@/utils/asyncHandler.js'
+import { ApiError } from '@/utils/apiError.js'
+
+function tenantId(req: Request): string {
+  if (!req.auth?.tenantId) throw ApiError.forbidden('No active workspace for this session')
+  return req.auth.tenantId
+}
+
+export const campaignsController = {
+  list: asyncHandler(async (req: Request, res: Response) => res.json({ campaigns: await campaignsService.list(tenantId(req)) })),
+  get: asyncHandler(async (req: Request, res: Response) => res.json({ campaign: await campaignsService.getById(tenantId(req), req.params.id as string) })),
+  create: asyncHandler(async (req: Request, res: Response) => {
+    const campaign = await campaignsService.create(tenantId(req), req.body)
+    res.status(201).json({ campaign })
+  }),
+  duplicate: asyncHandler(async (req: Request, res: Response) => {
+    const campaign = await campaignsService.duplicate(tenantId(req), req.params.id as string)
+    res.status(201).json({ campaign })
+  }),
+  cancel: asyncHandler(async (req: Request, res: Response) => {
+    res.json({ campaign: await campaignsService.cancelScheduled(tenantId(req), req.params.id as string) })
+  }),
+}
