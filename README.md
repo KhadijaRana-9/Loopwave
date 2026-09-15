@@ -97,8 +97,55 @@ Every external integration is built as a real adapter with a working demo/sandbo
 - **Payments**: Stripe adapter (`server/src/integrations/payments.adapter.ts`) with signature-verified webhook. Without `STRIPE_SECRET_KEY`/`RAZORPAY_KEY_ID`, plan changes go through an explicit sandbox path (no real charge, clearly labeled in the UI).
 - **Email**: Resend adapter (`server/src/integrations/email.adapter.ts`); logs to the console in demo mode without `RESEND_API_KEY`.
 
+## Testing
+
+`server/tests/` has a real integration suite (Vitest + Supertest) that runs against the actual Express app and database configured in `server/.env` — nothing is mocked. Covers auth (login/logout/refresh/invite-acceptance), RBAC (permission enforcement per role), and — the important one — **multi-tenant isolation**: proves via real HTTP requests that Tenant B gets a 404 on every one of Tenant A's contacts/deals/campaigns/conversations/templates/AI agents/chatbots/automations/forms/WhatsApp numbers, and never sees Tenant A's billing/integration state.
+
+```bash
+cd server
+npm test          # or: npx vitest run tests/
+```
+
+## Deployment
+
+This is two separate deployments, not one — the frontend is a static SPA (any static host works); the backend needs a host that runs a persistent Node process, because it uses Socket.IO (real-time inbox) and a BullMQ worker (background campaign sending), neither of which work on serverless platforms.
+
+### Frontend → Vercel
+
+Zero-config Vite deploy. `vercel.json` at the repo root already has the SPA rewrite rule React Router needs.
+
+```bash
+vercel login        # one-time, opens a browser
+vercel --prod        # deploys the repo root
+```
+
+Set `VITE_API_URL` in the Vercel project's environment variables to your backend's public URL (e.g. `https://your-app.up.railway.app/api`).
+
+### Backend + worker → Railway
+
+Two services from the same repo, both rooted at `server/`:
+
+```bash
+railway login              # one-time, opens a browser
+railway init                # create/link a project
+railway up --service api --root-directory server                          # uses server/railway.json
+railway up --service worker --root-directory server --config railway.worker.json
+```
+
+Add a Postgres and Redis instance from Railway's dashboard (or `railway add`), then set every variable from `server/.env.example` on both services — at minimum `DATABASE_URL`, `DIRECT_URL`, `JWT_ACCESS_SECRET`, `JWT_REFRESH_SECRET`, `ENCRYPTION_KEY`, `REDIS_URL`, and `WEB_APP_URL` (your Vercel domain, so CORS and cookies work). The `api` service's start command already runs `prisma migrate deploy` before booting.
+
+### GitHub
+
+Neither of the above needs GitHub in the loop (both CLIs can deploy straight from your local checkout), but if you want Vercel/Railway's auto-deploy-on-push:
+
+```bash
+gh auth login                                    # one-time, opens a browser
+gh repo create <name> --private --source=. --push
+```
+Then connect that repo from each platform's dashboard (Vercel: New Project → Import Git Repository; Railway: New Service → Deploy from GitHub repo, root directory `server`).
+
 ## What's not production-ready yet
 
-- No automated test suite (unit/integration/e2e) has been added — see the final report delivered alongside this codebase for specifics.
-- Real-time and campaign sending fall back to in-process behavior without a running Redis — fine for development, but production should run Redis + the worker.
+- Real-time and campaign sending fall back to in-process behavior without a running Redis — fine for development, but production should run Redis + the worker (see Deployment above).
 - File/media upload storage (S3-compatible) is not yet implemented.
+- No browser/e2e test suite is checked into the repo (manual Playwright-based QA was run during development — see the final QA report for what it covered).
