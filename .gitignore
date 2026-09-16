@@ -25,6 +25,9 @@ dist-ssr
 
 # Environment files (never commit real secrets)
 .env
-.env.local
+.env.*
+!.env.example
 server/.env
+server/.env.*
+!server/.env.example
 scripts/out/
