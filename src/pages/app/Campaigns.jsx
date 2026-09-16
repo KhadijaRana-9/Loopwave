@@ -13,6 +13,8 @@ import CampaignWizard from '@/features/campaigns/CampaignWizard'
 import { toast } from '@/store/toastStore'
 import { usePagination } from '@/hooks/usePagination'
 import * as campaignsService from '@/services/campaignsService'
+import { usePermission } from '@/hooks/usePermission'
+import { PERMISSIONS } from '@/constants/permissions'
 
 const STATUS_TONE = { draft: 'neutral', scheduled: 'info', running: 'brand', completed: 'success', failed: 'danger' }
 const STATUS_OPTIONS = ['all', 'draft', 'scheduled', 'running', 'completed', 'failed']
@@ -24,6 +26,8 @@ export default function Campaigns() {
   const [cancelId, setCancelId] = useState(null)
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const { can } = usePermission()
+  const canSend = can(PERMISSIONS.SEND_CAMPAIGNS)
 
   const campaignsQuery = useQuery({ queryKey: ['campaigns'], queryFn: campaignsService.listCampaigns })
 
@@ -31,7 +35,9 @@ export default function Campaigns() {
     mutationFn: campaignsService.createCampaign,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['campaigns'] })
+      queryClient.invalidateQueries({ queryKey: ['subscription'] })
       setWizardOpen(false)
+      createMutation.reset()
       toast.success('Campaign created')
     },
   })
@@ -101,9 +107,11 @@ export default function Campaigns() {
         title="Campaigns"
         description="Broadcast marketing, utility and authentication messages"
         action={
-          <Button onClick={() => setWizardOpen(true)}>
-            <Plus className="h-4 w-4" /> Create campaign
-          </Button>
+          canSend && (
+            <Button onClick={() => setWizardOpen(true)}>
+              <Plus className="h-4 w-4" /> Create campaign
+            </Button>
+          )
         }
       />
 
@@ -129,9 +137,13 @@ export default function Campaigns() {
 
       <CampaignWizard
         open={wizardOpen}
-        onClose={() => setWizardOpen(false)}
+        onClose={() => {
+          setWizardOpen(false)
+          createMutation.reset()
+        }}
         onSubmit={(data) => createMutation.mutate(data)}
         submitting={createMutation.isPending}
+        submitError={createMutation.error?.message}
       />
 
       <ConfirmDialog

@@ -304,6 +304,7 @@ export default function Inbox() {
                   onClick={() => setShowTemplates((v) => !v)}
                   className="rounded-lg p-2 text-ink-400 hover:bg-ink-100"
                   title="Insert template"
+                  aria-label="Insert template"
                 >
                   <FileText className="h-4.5 w-4.5" />
                 </button>
@@ -313,10 +314,10 @@ export default function Inbox() {
                   className="hidden"
                   onChange={(e) => e.target.files?.[0] && setAttachment(e.target.files[0])}
                 />
-                <button onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-ink-400 hover:bg-ink-100" title="Attach media">
+                <button onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-ink-400 hover:bg-ink-100" title="Attach media" aria-label="Attach media">
                   <Paperclip className="h-4.5 w-4.5" />
                 </button>
-                <button onClick={handleAiAssist} className="rounded-lg p-2 text-brand-500 hover:bg-brand-50" title="AI assist: suggest a reply">
+                <button onClick={handleAiAssist} className="rounded-lg p-2 text-brand-500 hover:bg-brand-50" title="AI assist: suggest a reply" aria-label="AI assist: suggest a reply">
                   <Sparkles className="h-4.5 w-4.5" />
                 </button>
                 <textarea
@@ -363,7 +364,7 @@ export default function Inbox() {
               <User className="h-3.5 w-3.5" /> Assigned to {agentName(active.assignedAgentId)}
             </div>
             <div className="flex items-center gap-2">
-              <Clock className="h-3.5 w-3.5" /> Last active {new Date(active.lastMessageAt).toLocaleString()}
+              <Clock className="h-3.5 w-3.5" /> Last active {active.lastMessageAt ? new Date(active.lastMessageAt).toLocaleString() : 'No messages yet'}
             </div>
           </div>
 

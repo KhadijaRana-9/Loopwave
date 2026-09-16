@@ -17,6 +17,20 @@ export async function listContacts({ search = '', status = 'all', tag = 'all' } 
   return items
 }
 
+// Paginated, server-side search for the campaign audience picker's
+// individual/multi-select list — deliberately separate from listContacts()
+// above (which is capped at a flat 100 for simple pages) so a large tenant's
+// audience picker can search/paginate instead of only ever seeing the first 100.
+export async function searchContacts({ search = '', page = 1, pageSize = 20 } = {}) {
+  const params = new URLSearchParams({ page: String(page), pageSize: String(pageSize) })
+  if (search) params.set('search', search)
+  return apiClient.get(`/contacts?${params.toString()}`)
+}
+
+export async function getContactFacets() {
+  return apiClient.get('/contacts/facets')
+}
+
 export async function getContact(id) {
   const { contact } = await apiClient.get(`/contacts/${id}`)
   return contact

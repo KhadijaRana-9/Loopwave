@@ -46,21 +46,43 @@ export const analyticsService = {
     const since = new Date(Date.now() - days * 86_400_000)
     const messages = await prisma.message.findMany({
       where: { conversation: { tenantId }, direction: 'OUTBOUND', createdAt: { gte: since } },
-      select: { status: true, createdAt: true },
+      select: { conversationId: true, status: true, createdAt: true },
     })
     const total = messages.length
     const delivered = messages.filter((m) => m.status === 'DELIVERED' || m.status === 'READ')
     const read = messages.filter((m) => m.status === 'READ')
+
+    // "Replied" is a real relationship, not a status field: an outbound message counts
+    // as replied when the same conversation has an inbound message after it.
+    const conversationIds = [...new Set(messages.map((m) => m.conversationId))]
+    const inboundMessages = conversationIds.length
+      ? await prisma.message.findMany({
+          where: { conversationId: { in: conversationIds }, direction: 'INBOUND' },
+          select: { conversationId: true, createdAt: true },
+        })
+      : []
+    const inboundByConversation = new Map<string, Date[]>()
+    for (const m of inboundMessages) {
+      const list = inboundByConversation.get(m.conversationId) ?? []
+      list.push(m.createdAt)
+      inboundByConversation.set(m.conversationId, list)
+    }
+    const wasReplied = (m: (typeof messages)[number]) => (inboundByConversation.get(m.conversationId) ?? []).some((t) => t > m.createdAt)
+    const replied = messages.filter(wasReplied)
+
     const deliveredRate = (rows: typeof messages) => pct(rows.filter((m) => m.status === 'DELIVERED' || m.status === 'READ').length, rows.length || 1)
     const readRateOf = (rows: typeof messages) => pct(rows.filter((m) => m.status === 'READ').length, rows.length || 1)
+    const replyRateOf = (rows: typeof messages) => pct(rows.filter(wasReplied).length, rows.length || 1)
     return {
       sent: series(days, messages.map((m) => dayKey(m.createdAt))),
       delivered: series(days, delivered.map((m) => dayKey(m.createdAt))),
       read: series(days, read.map((m) => dayKey(m.createdAt))),
       deliveryRate: pct(delivered.length, total),
       readRate: pct(read.length, total),
+      replyRate: pct(replied.length, total),
       deliveryRateChange: halfPeriodChange(deliveredRate, messages, since, days),
       readRateChange: halfPeriodChange(readRateOf, messages, since, days),
+      replyRateChange: halfPeriodChange(replyRateOf, messages, since, days),
       totalSent: total,
     }
   },

@@ -1,6 +1,16 @@
 import { prisma } from '@/config/prisma.js'
 import type { LeadStatus, Prisma } from '@prisma/client'
 
+export interface AudienceFilter {
+  mode?: 'all' | 'filter' | 'contacts'
+  tags?: string[]
+  sources?: string[]
+  statuses?: string[]
+  search?: string
+  assignedAgentId?: string
+  contactIds?: string[]
+}
+
 export const campaignsRepository = {
   list(tenantId: string) {
     return prisma.campaign.findMany({ where: { tenantId }, include: { template: true }, orderBy: { createdAt: 'desc' } })
@@ -44,14 +54,39 @@ export const campaignsRepository = {
     }
   },
 
-  resolveAudience(tenantId: string, filter: { tags?: string[]; sources?: string[]; statuses?: string[] }) {
-    const where: Prisma.ContactWhereInput = { tenantId }
+  // Server-side audience resolution — the one place "select all" actually
+  // gets resolved. Eligibility (opted in, has a phone number) is enforced
+  // here so it can never be bypassed by a frontend that forgot to filter.
+  audienceWhere(tenantId: string, filter: AudienceFilter): Prisma.ContactWhereInput {
+    const eligible: Prisma.ContactWhereInput = { tenantId, optedIn: true, phone: { not: '' } }
+    if (filter.mode === 'contacts') {
+      return { ...eligible, id: { in: filter.contactIds ?? [] } }
+    }
+    if (filter.mode === 'all') return eligible
+
     const and: Prisma.ContactWhereInput[] = []
     if (filter.tags?.length) and.push({ tags: { some: { tag: { name: { in: filter.tags } } } } })
     if (filter.sources?.length) and.push({ source: { in: filter.sources } })
     if (filter.statuses?.length) and.push({ leadStatus: { in: filter.statuses.map((s) => s.toUpperCase()) as LeadStatus[] } })
-    if (and.length) where.AND = and
-    return prisma.contact.findMany({ where, select: { id: true, phone: true, name: true } })
+    if (filter.assignedAgentId) and.push({ assignedAgentId: filter.assignedAgentId })
+    if (filter.search) {
+      and.push({
+        OR: [
+          { name: { contains: filter.search, mode: 'insensitive' } },
+          { phone: { contains: filter.search } },
+          { company: { contains: filter.search, mode: 'insensitive' } },
+        ],
+      })
+    }
+    return and.length ? { ...eligible, AND: and } : eligible
+  },
+
+  countAudience(tenantId: string, filter: AudienceFilter) {
+    return prisma.contact.count({ where: this.audienceWhere(tenantId, filter) })
+  },
+
+  resolveAudience(tenantId: string, filter: AudienceFilter) {
+    return prisma.contact.findMany({ where: this.audienceWhere(tenantId, filter), select: { id: true, phone: true, name: true } })
   },
 
   createRecipients(campaignId: string, contactIds: string[]) {
@@ -66,7 +101,28 @@ export const campaignsRepository = {
     return prisma.campaignRecipient.update({ where: { id }, data })
   },
 
-  addEvent(campaignId: string, type: string) {
-    return prisma.campaignEvent.create({ data: { campaignId, type } })
+  // Bridges the real Meta delivery/read webhook (matched by waMessageId) to
+  // the campaign recipient it belongs to — without this, real-provider sends
+  // would show accurate Message status but frozen PENDING campaign stats.
+  updateRecipientByWaMessageId(waMessageId: string, data: Prisma.CampaignRecipientUncheckedUpdateInput) {
+    return prisma.campaignRecipient.updateMany({ where: { waMessageId }, data })
+  },
+
+  addEvent(campaignId: string, type: string, meta: Prisma.InputJsonValue = {}) {
+    return prisma.campaignEvent.create({ data: { campaignId, type, meta } })
+  },
+
+  // Most recent campaign this contact actually received a message from
+  // (SENT/DELIVERED/READ, i.e. excluding still-PENDING/FAILED rows) — used to
+  // attribute an inbound reply back to the campaign that likely prompted it.
+  mostRecentDeliveredRecipient(contactId: string) {
+    return prisma.campaignRecipient.findFirst({
+      where: { contactId, status: { in: ['SENT', 'DELIVERED', 'READ'] } },
+      orderBy: { sentAt: 'desc' },
+    })
+  },
+
+  hasReplyEvent(campaignId: string, contactId: string) {
+    return prisma.campaignEvent.findFirst({ where: { campaignId, type: 'replied', meta: { path: ['contactId'], equals: contactId } } })
   },
 }

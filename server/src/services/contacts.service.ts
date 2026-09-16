@@ -11,6 +11,10 @@ export const contactsService = {
     return contactsRepository.list(tenantId, filters)
   },
 
+  facets(tenantId: string) {
+    return contactsRepository.facets(tenantId)
+  },
+
   async getById(tenantId: string, id: string) {
     const contact = await contactsRepository.findById(tenantId, id)
     if (!contact) throw ApiError.notFound('Contact not found')

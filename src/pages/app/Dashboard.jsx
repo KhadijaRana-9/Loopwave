@@ -71,7 +71,7 @@ export default function Dashboard() {
 
       <div className="mb-2 flex items-center gap-2">
         <Badge tone="brand">Demo data</Badge>
-        <span className="text-xs text-ink-400">Figures below are seeded demo data until a backend is connected.</span>
+        <span className="text-xs text-ink-500">Figures below are seeded demo data until a backend is connected.</span>
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">

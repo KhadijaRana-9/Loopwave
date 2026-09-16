@@ -83,9 +83,10 @@ function MessagingTab({ days }) {
   const chartData = data.sent.map((p, i) => ({ date: p.date.slice(5), sent: p.value, delivered: data.delivered[i].value, read: data.read[i].value }))
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="Delivery rate" value={`${data.deliveryRate}%`} delta={data.deliveryRateChange} deltaTone={data.deliveryRateChange?.startsWith('-') ? 'danger' : 'success'} />
         <StatCard label="Read rate" value={`${data.readRate}%`} delta={data.readRateChange} deltaTone={data.readRateChange?.startsWith('-') ? 'danger' : 'success'} />
+        <StatCard label="Reply rate" value={`${data.replyRate}%`} delta={data.replyRateChange} deltaTone={data.replyRateChange?.startsWith('-') ? 'danger' : 'success'} />
       </div>
       <p className="mb-4 mt-1 text-xs text-ink-400">First vs. second half of the selected {days}-day period</p>
       <Card className="mt-4">

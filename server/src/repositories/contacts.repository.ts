@@ -51,6 +51,22 @@ export const contactsRepository = {
     return prisma.contact.count({ where: { tenantId } })
   },
 
+  // Distinct filter vocabulary for pickers (audience selector, contact
+  // filters) without pulling every contact row to the client just to build
+  // a list of tag/source/status chips.
+  async facets(tenantId: string) {
+    const [tags, sources, statuses] = await Promise.all([
+      prisma.tag.findMany({ where: { tenantId }, select: { name: true }, orderBy: { name: 'asc' } }),
+      prisma.contact.findMany({ where: { tenantId, source: { not: null } }, select: { source: true }, distinct: ['source'] }),
+      prisma.contact.groupBy({ by: ['leadStatus'], where: { tenantId }, _count: { _all: true } }),
+    ])
+    return {
+      tags: tags.map((t) => t.name),
+      sources: sources.map((s) => s.source).filter((s): s is string => Boolean(s)),
+      statuses: statuses.map((s) => ({ value: s.leadStatus, count: s._count._all })),
+    }
+  },
+
   findById(tenantId: string, id: string) {
     return prisma.contact.findFirst({
       where: { id, tenantId },

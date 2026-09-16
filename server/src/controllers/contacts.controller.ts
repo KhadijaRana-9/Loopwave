@@ -25,6 +25,10 @@ export const contactsController = {
     })
   }),
 
+  facets: asyncHandler(async (req: Request, res: Response) => {
+    res.json(await contactsService.facets(tenantId(req)))
+  }),
+
   get: asyncHandler(async (req: Request, res: Response) => {
     const contact = await contactsService.getById(tenantId(req), req.params.id as string)
     res.json({ contact: serializeContact(contact) })

@@ -170,7 +170,9 @@ export default function ContactDetailDrawer({ contact, onClose }) {
 
           <div>
             <div className="mb-1.5 text-xs font-medium text-ink-500">Last interaction</div>
-            <p className="text-sm text-ink-700">{new Date(contact.lastInteractionAt).toLocaleString()} — {agentName(contact.assignedAgentId)}</p>
+            <p className="text-sm text-ink-700">
+              {contact.lastInteractionAt ? new Date(contact.lastInteractionAt).toLocaleString() : 'No interactions yet'} — {agentName(contact.assignedAgentId)}
+            </p>
           </div>
         </div>
       )}

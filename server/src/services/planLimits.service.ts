@@ -1,4 +1,5 @@
 import { prisma } from '@/config/prisma.js'
+import { getMonthlyUsage } from '@/services/usage.service.js'
 import { ApiError } from '@/utils/apiError.js'
 
 interface PlanLimits {
@@ -27,4 +28,29 @@ export async function assertUnderLimit(tenantId: string, metric: keyof PlanLimit
   const limit = limits[metric]
   if (limit === undefined || limit === -1) return
   if (currentCount >= limit) throw ApiError.planLimitReached(String(metric))
+}
+
+// For rolling monthly metrics (messages sent, AI generations) where the
+// question isn't "is a stock count at capacity" but "does used + this
+// request fit inside the monthly allowance". Backend-authoritative: the
+// frontend may show an estimate, but this is what actually blocks a send.
+export async function assertUsageAllowance(tenantId: string, metric: keyof PlanLimits, additionalAmount: number) {
+  const subscription = await prisma.subscription.findUnique({ where: { tenantId }, include: { plan: true } })
+  if (!subscription) return { limit: -1, used: 0, remaining: Infinity }
+
+  const limits = subscription.plan.limits as PlanLimits
+  const limit = limits[metric]
+  const usage = await getMonthlyUsage(tenantId)
+  const used = usage[String(metric)] ?? 0
+
+  if (limit === undefined || limit === -1) return { limit: -1, used, remaining: Infinity }
+
+  const remaining = Math.max(0, limit - used)
+  if (additionalAmount > remaining) {
+    throw ApiError.usageAllowanceExceeded(
+      `You selected ${additionalAmount.toLocaleString()} recipients, but your plan currently has ${remaining.toLocaleString()} messages available.`,
+      { limit, used, requested: additionalAmount, remaining },
+    )
+  }
+  return { limit, used, remaining }
 }

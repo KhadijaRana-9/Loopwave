@@ -15,7 +15,7 @@ await page.fill('input[type="password"]', 'Demo1234!')
 await page.click('button[type="submit"]')
 await page.waitForURL('**/app/dashboard', { timeout: 15000 })
 
-const pages = ['/app/contacts', '/app/pipeline', '/app/inbox']
+const pages = ['/app/dashboard', '/app/contacts', '/app/pipeline', '/app/inbox']
 for (const p of pages) {
   await page.goto(`${BASE}${p}`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(300)

@@ -120,7 +120,7 @@ export default function Contacts() {
     {
       key: 'lastInteractionAt',
       header: 'Last interaction',
-      render: (row) => new Date(row.lastInteractionAt).toLocaleDateString(),
+      render: (row) => (row.lastInteractionAt ? new Date(row.lastInteractionAt).toLocaleDateString() : '—'),
     },
   ]
 

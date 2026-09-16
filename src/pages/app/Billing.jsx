@@ -87,7 +87,7 @@ export default function Billing() {
         <Card className="lg:col-span-2">
           <CardHeader
             title={`${subscription.plan.name} plan`}
-            description={`Renews ${new Date(subscription.renewsAt).toLocaleDateString()}`}
+            description={subscription.renewsAt ? `Renews ${new Date(subscription.renewsAt).toLocaleDateString()}` : 'No renewal date yet'}
             action={<Badge tone="brand">{subscription.status}</Badge>}
           />
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

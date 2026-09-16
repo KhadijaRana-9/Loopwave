@@ -17,6 +17,7 @@ const router = Router()
 router.use(requireAuth, requireTenant)
 
 router.get('/', requirePermission(PERMISSIONS.VIEW_CONTACTS), validate({ query: listContactsQuerySchema }), contactsController.list)
+router.get('/facets', requirePermission(PERMISSIONS.VIEW_CONTACTS), contactsController.facets)
 router.post('/', requirePermission(PERMISSIONS.EDIT_CONTACTS), validate({ body: createContactSchema }), contactsController.create)
 router.post(
   '/bulk',

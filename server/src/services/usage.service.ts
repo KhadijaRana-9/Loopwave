@@ -25,7 +25,7 @@ export async function getMonthlyUsage(tenantId: string): Promise<Record<string, 
 // counters above, assembled into the same shape the frontend's usage meters
 // already expect (see src/constants/plans.js PLAN_LIMIT_KEYS).
 export async function getUsageSnapshot(tenantId: string) {
-  const [contacts, teamMembers, whatsappNumbers, chatbotFlows, automationWorkflows, integrations, monthly] = await Promise.all([
+  const [contacts, teamMembers, whatsappNumbers, chatbotFlows, automationWorkflows, integrations, monthly, tenant] = await Promise.all([
     prisma.contact.count({ where: { tenantId } }),
     prisma.membership.count({ where: { tenantId, status: { not: 'DISABLED' } } }),
     prisma.whatsAppPhoneNumber.count({ where: { account: { tenantId } } }),
@@ -33,7 +33,13 @@ export async function getUsageSnapshot(tenantId: string) {
     prisma.automation.count({ where: { tenantId } }),
     prisma.integration.count({ where: { tenantId, connected: true } }),
     getMonthlyUsage(tenantId),
+    prisma.tenant.findUniqueOrThrow({ where: { id: tenantId }, select: { createdAt: true } }),
   ])
+
+  // How many days of analytics data the tenant could actually have accumulated
+  // so far, not a fixed placeholder — a brand-new signup has 0, not some
+  // arbitrary "you're already over the limit" number.
+  const analyticsHistoryDays = Math.max(0, Math.floor((Date.now() - tenant.createdAt.getTime()) / 86_400_000))
 
   return {
     contacts,
@@ -46,6 +52,6 @@ export async function getUsageSnapshot(tenantId: string) {
     monthlyMarketingMessages: monthly.monthlyMarketingMessages ?? 0,
     aiUsage: monthly.aiUsage ?? 0,
     storageGb: 0,
-    analyticsHistoryDays: 90,
+    analyticsHistoryDays,
   }
 }

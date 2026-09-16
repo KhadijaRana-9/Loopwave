@@ -1,13 +1,17 @@
+import { randomUUID } from 'node:crypto'
 import { campaignsRepository } from '@/repositories/campaigns.repository.js'
 import { sendWhatsAppMessage, scheduleDemoRecipientProgression } from '@/integrations/whatsapp.adapter.js'
+import { generateCampaignMessage } from '@/integrations/ai.adapter.js'
 import { recordUsage } from '@/services/usage.service.js'
+import { assertUsageAllowance } from '@/services/planLimits.service.js'
 import { notifyTenant } from '@/services/notifications.service.js'
 import { enqueueCampaignSend } from '@/jobs/campaigns.queue.js'
 import { serializeTemplate } from '@/utils/serializers.js'
+import { resolveMessageVariables, extractVariables, unresolvableVariables } from '@/utils/messageVariables.js'
 import { ApiError } from '@/utils/apiError.js'
 import { prisma } from '@/config/prisma.js'
 import type { z } from 'zod'
-import type { createCampaignSchema } from '@/validators/campaigns.validators.js'
+import type { createCampaignSchema, campaignComposeSchema, audienceFilterSchema } from '@/validators/campaigns.validators.js'
 import type { Campaign, Template } from '@prisma/client'
 
 type CampaignWithTemplate = Campaign & { template: Template }
@@ -41,16 +45,17 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
   if (!campaign) return
 
   const pending = await campaignsRepository.pendingRecipients(campaignId)
-  const contacts = await prisma.contact.findMany({ where: { id: { in: pending.map((r) => r.contactId) } }, select: { id: true, phone: true } })
-  const phoneById = new Map(contacts.map((c) => [c.id, c.phone]))
+  const contacts = await prisma.contact.findMany({ where: { id: { in: pending.map((r) => r.contactId) } }, select: { id: true, name: true, phone: true, company: true } })
+  const contactById = new Map(contacts.map((c) => [c.id, c]))
 
   for (const recipient of pending) {
-    const phone = phoneById.get(recipient.contactId)
-    if (!phone) {
+    const contact = contactById.get(recipient.contactId)
+    if (!contact?.phone) {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: 'Contact has no phone number on file' })
       continue
     }
-    const result = await sendWhatsAppMessage({ to: phone, text: campaign.template.body })
+    const text = resolveMessageVariables(campaign.template.body, contact)
+    const result = await sendWhatsAppMessage({ to: contact.phone, text })
     if (result.status === 'SENT') {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'SENT', waMessageId: result.waMessageId || null, sentAt: new Date() })
       if (result.demo) scheduleDemoRecipientProgression(recipient.id)
@@ -112,13 +117,55 @@ export const campaignsService = {
   },
 
   async create(tenantId: string, input: z.infer<typeof createCampaignSchema>) {
-    const template = await prisma.template.findFirst({ where: { id: input.templateId, tenantId } })
-    if (!template) throw ApiError.notFound('Template not found')
+    let existingTemplate: Template | null = null
+    if (input.templateId) {
+      existingTemplate = await prisma.template.findFirst({ where: { id: input.templateId, tenantId } })
+      if (!existingTemplate) throw ApiError.notFound('Template not found')
+    } else if (input.message) {
+      // Only the AI-composed/hand-written path uses named {{variable}}
+      // personalization — pre-existing templates use Meta-style positional
+      // {{1}}/{{2}} placeholders filled once per campaign (see
+      // CampaignWizard's Variables step), a different, untouched flow.
+      const unresolvable = unresolvableVariables(input.message, ['discount', 'shopLink'])
+      if (unresolvable.length) {
+        throw ApiError.badRequest(`The message uses variables that can't be resolved: ${unresolvable.map((v) => `{{${v}}}`).join(', ')}`, { unresolvableVariables: unresolvable })
+      }
+    } else {
+      throw ApiError.badRequest('Either templateId or message is required')
+    }
 
     const audience = await campaignsRepository.resolveAudience(tenantId, input.audienceFilter)
+    // Backend-authoritative, and checked before any row is written: recalculated
+    // here from the real resolved audience size, never trusted from a
+    // frontend-supplied count, and never leaves an orphaned template behind
+    // when it blocks the send.
+    await assertUsageAllowance(tenantId, 'monthlyMarketingMessages', audience.length)
+
+    // AI-composed (or hand-written) campaign message becomes a real Template
+    // row now that the send is known to be allowed — reuses the exact same
+    // send/approval/audit path every other campaign already goes through,
+    // instead of a parallel "ad hoc message" concept. Auto-approved: there's
+    // no external Meta template review in demo mode, and dispatchCampaign
+    // never gates on status. Templates are unique per (tenantId, name,
+    // language) — a campaign name alone isn't (two "Summer Sale" campaigns is
+    // normal), so this gets a disambiguating suffix rather than colliding.
+    const template =
+      existingTemplate ??
+      (await prisma.template.create({
+        data: {
+          tenantId,
+          name: `${input.name} (${randomUUID().slice(0, 8)})`,
+          category: 'marketing',
+          language: input.language || 'en_US',
+          status: 'APPROVED',
+          body: input.message!,
+          variables: extractVariables(input.message!),
+        },
+      }))
+
     const campaign = await campaignsRepository.create(tenantId, {
       name: input.name,
-      templateId: input.templateId,
+      templateId: template.id,
       audienceFilter: input.audienceFilter,
       scheduledAt: input.scheduledAt,
       status: 'DRAFT',
@@ -132,10 +179,25 @@ export const campaignsService = {
     return serialize(final!)
   },
 
+  async previewAudience(tenantId: string, filter: z.infer<typeof audienceFilterSchema>) {
+    const count = await campaignsRepository.countAudience(tenantId, filter)
+    const allowance = await assertUsageAllowance(tenantId, 'monthlyMarketingMessages', 0).catch(() => null)
+    return {
+      count,
+      plan: allowance ? { limit: allowance.limit, used: allowance.used, remaining: allowance.remaining === Infinity ? -1 : allowance.remaining } : null,
+    }
+  },
+
+  async composeMessage(tenantId: string, input: z.infer<typeof campaignComposeSchema>) {
+    const result = await generateCampaignMessage(input)
+    await recordUsage(tenantId, 'aiUsage', 1)
+    return result
+  },
+
   async duplicate(tenantId: string, id: string) {
     const source = await campaignsRepository.findById(tenantId, id)
     if (!source) throw ApiError.notFound('Campaign not found')
-    const audience = await campaignsRepository.resolveAudience(tenantId, source.audienceFilter as { tags?: string[]; sources?: string[]; statuses?: string[] })
+    const audience = await campaignsRepository.resolveAudience(tenantId, source.audienceFilter as object)
     const copy = await campaignsRepository.create(tenantId, {
       name: `${source.name} (copy)`,
       templateId: source.templateId,

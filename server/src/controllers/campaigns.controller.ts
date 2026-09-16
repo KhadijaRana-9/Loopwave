@@ -22,4 +22,10 @@ export const campaignsController = {
   cancel: asyncHandler(async (req: Request, res: Response) => {
     res.json({ campaign: await campaignsService.cancelScheduled(tenantId(req), req.params.id as string) })
   }),
+  previewAudience: asyncHandler(async (req: Request, res: Response) => {
+    res.json(await campaignsService.previewAudience(tenantId(req), req.body.audienceFilter))
+  }),
+  compose: asyncHandler(async (req: Request, res: Response) => {
+    res.json(await campaignsService.composeMessage(tenantId(req), req.body))
+  }),
 }

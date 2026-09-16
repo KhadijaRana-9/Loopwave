@@ -24,3 +24,17 @@ export async function cancelScheduledCampaign(id) {
   const { campaign } = await apiClient.post(`/campaigns/${id}/cancel`)
   return campaign
 }
+
+// Talks to the real backend AI composer (server/src/integrations/ai.adapter.ts) —
+// returns a real OpenAI completion when configured, otherwise an honestly-labeled
+// demo message actually assembled from the given brief.
+export async function composeAiMessage(payload) {
+  return apiClient.post('/campaigns/ai/compose', payload)
+}
+
+// Server-resolved count for the current audience filter — never loads the
+// full contact list just to show "how many". This is what "Select All"
+// actually means: whatever the backend resolves for this filter at send time.
+export async function previewAudience(audienceFilter) {
+  return apiClient.post('/campaigns/audience/preview', { audienceFilter })
+}

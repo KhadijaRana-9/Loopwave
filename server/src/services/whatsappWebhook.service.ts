@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma.js'
 import { whatsappRepository } from '@/repositories/whatsapp.repository.js'
 import { conversationsRepository } from '@/repositories/conversations.repository.js'
+import { campaignsRepository } from '@/repositories/campaigns.repository.js'
 import { getIo } from '@/websocket/io.js'
 import { serializeNotification } from '@/utils/serializers.js'
 
@@ -67,6 +68,17 @@ export async function processWhatsAppWebhook(payload: MetaWebhookPayload): Promi
         })
         await conversationsRepository.touchLastMessage(conversation.id, created.createdAt, false)
 
+        // Attribute the reply to whichever campaign most recently messaged
+        // this contact, so campaign analytics reflect real inbound replies
+        // instead of only outbound delivery/read — see campaigns analytics
+        // "replied" stat (campaigns.repository.ts#stats). One event per
+        // contact per campaign, not one per message.
+        const recentCampaignRecipient = await campaignsRepository.mostRecentDeliveredRecipient(contact.id)
+        if (recentCampaignRecipient) {
+          const alreadyRecorded = await campaignsRepository.hasReplyEvent(recentCampaignRecipient.campaignId, contact.id)
+          if (!alreadyRecorded) await campaignsRepository.addEvent(recentCampaignRecipient.campaignId, 'replied', { contactId: contact.id })
+        }
+
         const notification = await prisma.notification.create({
           data: { tenantId, category: 'new_lead', title: `New WhatsApp message from ${contactName}`, body: message.text?.body ?? undefined },
         })
@@ -80,6 +92,14 @@ export async function processWhatsAppWebhook(payload: MetaWebhookPayload): Promi
         const mapped = status.status ? STATUS_MAP[status.status] : undefined
         if (!status.id || !mapped) continue
         await prisma.message.updateMany({ where: { waMessageId: status.id }, data: { status: mapped } }).catch(() => {})
+
+        // Same status event also drives campaign recipient/analytics state
+        // for real Meta sends — demo-mode sends get this from
+        // scheduleDemoRecipientProgression instead (see whatsapp.adapter.ts).
+        if (mapped === 'DELIVERED' || mapped === 'READ' || mapped === 'FAILED') {
+          const recipientData = mapped === 'DELIVERED' ? { status: mapped, deliveredAt: new Date() } : mapped === 'READ' ? { status: mapped, readAt: new Date() } : { status: mapped }
+          await campaignsRepository.updateRecipientByWaMessageId(status.id, recipientData).catch(() => {})
+        }
       }
     }
   }

@@ -39,6 +39,10 @@ export class ApiError extends Error {
     return new ApiError(402, 'PLAN_LIMIT_REACHED', `Your plan's limit for ${metric} has been reached. Upgrade to continue.`)
   }
 
+  static usageAllowanceExceeded(message: string, details: { limit: number; used: number; requested: number; remaining: number }) {
+    return new ApiError(402, 'USAGE_ALLOWANCE_EXCEEDED', message, details)
+  }
+
   static internal(message = 'Something went wrong on our end') {
     return new ApiError(500, 'INTERNAL_ERROR', message)
   }
