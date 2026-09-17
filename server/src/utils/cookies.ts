@@ -17,7 +17,7 @@ function baseCookieOptions() {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: (isProduction ? 'none' : 'lax') as const,
+    sameSite: isProduction ? ('none' as const) : ('lax' as const),
     domain: env.COOKIE_DOMAIN === 'localhost' ? undefined : env.COOKIE_DOMAIN,
   }
 }
