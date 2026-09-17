@@ -33,3 +33,4 @@ server/.env.*
 scripts/out/
 
 .vercel
+.env*
