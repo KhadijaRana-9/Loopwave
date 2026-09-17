@@ -169,6 +169,7 @@ model Subscription {
   provider           String? // 'stripe' | 'razorpay' | null (unset until connected)
   providerCustomerId String?
   providerSubId      String?
+  billingCycle       String             @default("monthly") // 'monthly' | 'yearly' — the cycle this specific subscription is billed on (Plan.billingCycle is only the catalog default)
   currentPeriodEnd   DateTime?
   cancelAtPeriodEnd  Boolean            @default(false)
   createdAt          DateTime           @default(now())

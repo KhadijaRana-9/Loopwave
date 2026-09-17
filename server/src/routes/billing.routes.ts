@@ -15,6 +15,9 @@ router.use(requireAuth, requireTenant, requirePermission(PERMISSIONS.MANAGE_BILL
 router.get('/subscription', billingController.getSubscription)
 router.get('/plans', billingController.listPlans)
 router.get('/invoices', billingController.listInvoices)
+router.get('/payment-method', billingController.paymentMethod)
 router.post('/checkout', validate({ body: checkoutSchema }), billingController.checkout)
+router.post('/cancel', billingController.cancel)
+router.post('/resume', billingController.resume)
 
 export default router
