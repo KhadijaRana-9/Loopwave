@@ -31,3 +31,5 @@ server/.env
 server/.env.*
 !server/.env.example
 scripts/out/
+
+.vercel

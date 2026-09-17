@@ -4,13 +4,20 @@ import { env, isProduction } from '@/config/env.js'
 const ACCESS_COOKIE = 'access_token'
 const REFRESH_COOKIE = 'refresh_token'
 
-// httpOnly + sameSite=lax stops JS-based and cross-site CSRF-style reads;
-// `secure` is forced on in production (cookies must travel over HTTPS there).
+// httpOnly stops JS-based reads. In production the frontend (Vercel) and API
+// (Railway) are on different registrable domains, so the cookie is
+// necessarily cross-site from the browser's perspective — SameSite=Lax would
+// never be attached to the fetch()/XHR calls apiClient.js makes with
+// credentials:'include', breaking auth immediately after login. SameSite=None
+// requires Secure, which is already forced on in production; CORS (locked to
+// the single WEB_APP_URL origin, credentials:true) is the actual access
+// control here, not SameSite. Locally, frontend and API are both `localhost`
+// (same site regardless of port), so Lax is kept there.
 function baseCookieOptions() {
   return {
     httpOnly: true,
     secure: isProduction,
-    sameSite: 'lax' as const,
+    sameSite: (isProduction ? 'none' : 'lax') as const,
     domain: env.COOKIE_DOMAIN === 'localhost' ? undefined : env.COOKIE_DOMAIN,
   }
 }

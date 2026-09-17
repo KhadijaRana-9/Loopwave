@@ -1,0 +1,7 @@
+# Vercel hosts the frontend only — the backend (Express + Socket.IO + BullMQ
+# worker) needs a persistent Node process and runs on Railway instead (see
+# server/railway.json, server/railway.worker.json, README.md#deployment).
+# Excluding it here stops Vercel's monorepo service auto-detection from
+# treating server/ as a second app to build.
+server/
+scripts/
