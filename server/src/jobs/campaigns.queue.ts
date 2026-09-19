@@ -13,6 +13,17 @@ let queue: Queue | null = null
 export async function enqueueCampaignSend(tenantId: string, campaignId: string, delayMs = 0): Promise<boolean> {
   if (!(await isRedisAvailable())) return false
   queue ??= new Queue(CAMPAIGN_QUEUE_NAME, { connection: redisConnection() })
-  await queue.add('send', { tenantId, campaignId }, { delay: delayMs, removeOnComplete: true, removeOnFail: 100 })
+  await queue.add('send', { tenantId, campaignId }, { delay: delayMs, removeOnComplete: true, removeOnFail: 100, jobId: campaignId })
   return true
+}
+
+// Cancelling a scheduled campaign must actually remove the delayed BullMQ
+// job, not just flip the DB status back to draft — otherwise the job still
+// fires at its original time and sends anyway. jobId is set to the
+// campaignId above specifically so this lookup is a direct get, not a scan.
+export async function removeCampaignSend(campaignId: string): Promise<void> {
+  if (!(await isRedisAvailable())) return
+  queue ??= new Queue(CAMPAIGN_QUEUE_NAME, { connection: redisConnection() })
+  const job = await queue.getJob(campaignId)
+  if (job) await job.remove().catch(() => {})
 }

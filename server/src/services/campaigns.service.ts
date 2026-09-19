@@ -5,7 +5,7 @@ import { generateCampaignMessage } from '@/integrations/ai.adapter.js'
 import { recordUsage } from '@/services/usage.service.js'
 import { assertUsageAllowance } from '@/services/planLimits.service.js'
 import { notifyTenant } from '@/services/notifications.service.js'
-import { enqueueCampaignSend } from '@/jobs/campaigns.queue.js'
+import { enqueueCampaignSend, removeCampaignSend } from '@/jobs/campaigns.queue.js'
 import { serializeTemplate } from '@/utils/serializers.js'
 import { resolveMessageVariables, extractVariables, unresolvableVariables } from '@/utils/messageVariables.js'
 import { ApiError } from '@/utils/apiError.js'
@@ -94,7 +94,15 @@ function scheduleFutureSendFallback(tenantId: string, campaignId: string, atMs: 
 async function scheduleSend(tenantId: string, campaignId: string, sendAtMs: number) {
   const delayMs = Math.max(0, sendAtMs - Date.now())
   const queued = await enqueueCampaignSend(tenantId, campaignId, delayMs)
-  if (queued) return
+  if (queued) {
+    // The worker flips this to RUNNING when it actually dequeues the job
+    // (near-immediate for delayMs<=5000), but a job sitting delayed in Redis
+    // for longer than that needs to show as SCHEDULED for the whole wait —
+    // otherwise it looks like an unsent draft and "cancel scheduled
+    // campaign" has no SCHEDULED campaign to find.
+    if (delayMs > 5000) await campaignsRepository.update(tenantId, campaignId, { status: 'SCHEDULED' })
+    return
+  }
 
   if (delayMs <= 5000) {
     await campaignsRepository.update(tenantId, campaignId, { status: 'RUNNING', startedAt: new Date() })
@@ -217,6 +225,10 @@ export const campaignsService = {
       clearTimeout(timer)
       scheduledTimers.delete(id)
     }
+    // Must remove the actual delayed job, not just flip the DB status back
+    // to draft — otherwise the queued send still fires at its original time
+    // regardless of what the campaign now shows as.
+    await removeCampaignSend(id)
     const updated = await campaignsRepository.update(tenantId, id, { status: 'DRAFT', scheduledAt: null })
     return serialize(updated!)
   },
