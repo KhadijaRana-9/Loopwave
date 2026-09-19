@@ -90,7 +90,7 @@ describe('API behavior: validation, duplicates, not-found, webhooks', () => {
     })
 
     it('turns an inbound message webhook into a real Contact + Conversation + Message', async () => {
-      const connectRes = await session.agent.post('/api/whatsapp/connect').send({ label: 'Webhook Test Line' })
+      const connectRes = await session.agent.post('/api/whatsapp/connect').send({ label: 'Webhook Test Line', phoneNumber: `+1555${Date.now()}`.slice(0, 13) })
       const metaPhoneNumberId = `meta-pn-${crypto.randomUUID()}`
       await prisma.whatsAppPhoneNumber.update({ where: { id: connectRes.body.id }, data: { metaPhoneNumberId, status: 'CONNECTED' } })
 

@@ -12,6 +12,9 @@ import Spinner from '@/components/ui/Spinner'
 import { toast } from '@/store/toastStore'
 import { usePagination } from '@/hooks/usePagination'
 import * as templatesService from '@/services/templatesService'
+import { WHATSAPP_LANGUAGES } from '@/constants/whatsappLanguages'
+import LanguagePicker from '@/components/ui/LanguagePicker'
+import { renderPreviewText } from '@/utils/messagePreview'
 
 const STATUS_TONE = { draft: 'neutral', approved: 'success', pending: 'warning', rejected: 'danger' }
 const EMPTY_FORM = { name: '', category: 'marketing', language: 'en_US', body: '' }
@@ -77,7 +80,7 @@ export default function Templates() {
   const columns = [
     { key: 'name', header: 'Template', render: (row) => <span className="font-mono text-xs font-medium text-ink-900">{row.name}</span> },
     { key: 'category', header: 'Category', render: (row) => <Badge tone="brand">{row.category}</Badge> },
-    { key: 'language', header: 'Language' },
+    { key: 'language', header: 'Language', render: (row) => WHATSAPP_LANGUAGES.find((l) => l.code === row.language)?.name ?? row.language },
     { key: 'status', header: 'Meta approval', render: (row) => <Badge tone={STATUS_TONE[row.status]}>{row.status}</Badge> },
     {
       key: 'actions',
@@ -154,11 +157,7 @@ export default function Templates() {
               <option value="utility">Utility</option>
               <option value="authentication">Authentication</option>
             </Select>
-            <Select label="Language" value={form.language} onChange={(e) => setForm({ ...form, language: e.target.value })}>
-              <option value="en_US">English (US)</option>
-              <option value="hi_IN">Hindi</option>
-              <option value="es_ES">Spanish</option>
-            </Select>
+            <LanguagePicker label="Language" value={form.language} onChange={(code) => setForm({ ...form, language: code })} />
           </div>
           <Textarea label="Body" value={form.body} onChange={(e) => setForm({ ...form, body: e.target.value })} placeholder="Hi {{1}}, ..." />
         </div>
@@ -168,7 +167,7 @@ export default function Templates() {
         {previewTemplate && (
           <div className="flex flex-col items-center gap-3">
             <div className="w-full max-w-xs rounded-2xl bg-ink-950 p-4">
-              <div className="rounded-xl bg-[#e9fbe5] p-3 text-sm text-ink-900">{previewTemplate.body}</div>
+              <div className="whitespace-pre-wrap rounded-xl bg-[#e9fbe5] p-3 text-sm text-ink-900">{renderPreviewText(previewTemplate.body)}</div>
             </div>
             <div className="flex flex-wrap gap-1.5">
               {previewTemplate.variables.map((v) => (

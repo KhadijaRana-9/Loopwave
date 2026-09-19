@@ -5,8 +5,8 @@ export async function listWhatsappNumbers() {
   return numbers
 }
 
-export async function startEmbeddedSignup({ label }) {
-  return apiClient.post('/whatsapp/connect', { label })
+export async function startEmbeddedSignup({ label, phoneNumber }) {
+  return apiClient.post('/whatsapp/connect', { label, phoneNumber })
 }
 
 export async function disconnectNumber(id) {

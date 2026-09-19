@@ -9,7 +9,6 @@ import Card, { CardHeader } from '@/components/ui/Card'
 import { Select } from '@/components/ui/Input'
 import Spinner from '@/components/ui/Spinner'
 import UsageMeter from '@/components/ui/UsageMeter'
-import Badge from '@/components/ui/Badge'
 import { listContacts } from '@/services/contactsService'
 import { listConversations } from '@/services/conversationsService'
 import { listCampaigns } from '@/services/campaignsService'
@@ -69,14 +68,9 @@ export default function Dashboard() {
         }
       />
 
-      <div className="mb-2 flex items-center gap-2">
-        <Badge tone="brand">Demo data</Badge>
-        <span className="text-xs text-ink-500">Figures below are seeded demo data until a backend is connected.</span>
-      </div>
-
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Total contacts" value={contacts.length.toLocaleString()} icon={Users} delta="+8.2%" onClick={() => navigate('/app/contacts')} />
-        <StatCard label="New leads" value={newLeads} icon={TrendingUp} delta="+4.1%" onClick={() => navigate('/app/contacts?status=new')} />
+        <StatCard label="Total contacts" value={contacts.length.toLocaleString()} icon={Users} onClick={() => navigate('/app/contacts')} />
+        <StatCard label="New leads" value={newLeads} icon={TrendingUp} onClick={() => navigate('/app/contacts?status=new')} />
         <StatCard
           label="Active conversations"
           value={activeConversations}
@@ -132,8 +126,8 @@ export default function Dashboard() {
 
       <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <StatCard
-          label="AI conversations (demo)"
-          value="142"
+          label="AI replies this month"
+          value={subscription.usage.aiUsage.toLocaleString()}
           icon={Bot}
           hint="Handled without human intervention"
           onClick={() => navigate('/app/analytics?tab=ai')}

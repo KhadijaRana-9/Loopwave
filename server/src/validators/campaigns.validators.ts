@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { WHATSAPP_LANGUAGE_CODES } from '@/config/whatsappLanguages.js'
 
 export const campaignIdParamSchema = z.object({ id: z.string().min(1) })
 
@@ -24,7 +25,15 @@ export const createCampaignSchema = z
     // Alternative to templateId: an AI-composed / hand-written message that
     // gets saved as a real Template row on creation (see campaigns.service.ts).
     message: z.string().trim().min(1).max(4096).optional(),
-    language: z.string().trim().default('en_US'),
+    // This becomes the saved Template's language (campaigns.service.ts), so
+    // it's restricted to codes Meta's WhatsApp template system actually
+    // recognizes — an arbitrary code here would look fine locally but could
+    // never be approved as a real template.
+    language: z
+      .string()
+      .trim()
+      .default('en_US')
+      .refine((v) => WHATSAPP_LANGUAGE_CODES.has(v as never), { message: 'Unsupported WhatsApp template language code' }),
     audienceFilter: audienceFilterSchema.default({}),
     scheduledAt: z.coerce.date().nullable().optional(),
   })

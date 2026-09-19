@@ -1,7 +1,20 @@
 import { PrismaClient, LeadStatus } from '@prisma/client'
 import { hashPassword } from '../src/utils/password.js'
+import crypto from 'node:crypto'
 
 const prisma = new PrismaClient()
+
+// No hardcoded fallback password ("ChangeMe123!" and friends are exactly
+// the pattern to avoid) — if SEED_*_PASSWORD isn't set, generate a real
+// random one and print it once instead of a predictable default.
+function randomPassword(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789'
+  const symbols = '!@#$%'
+  let pw = ''
+  for (let i = 0; i < 16; i++) pw += alphabet[crypto.randomInt(alphabet.length)]!
+  pw += symbols[crypto.randomInt(symbols.length)]! + crypto.randomInt(10) + symbols[crypto.randomInt(symbols.length)]!
+  return pw
+}
 
 // Mirrors src/constants/plans.js (PLANS) on the frontend so Super Admin's
 // plan editor and the tenant-facing billing/usage screens read the same
@@ -46,25 +59,25 @@ async function main() {
   }
 
   // --- Platform Super Admin ---
-  const superAdminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD ?? 'ChangeMe123!'
+  const superAdminPassword = process.env.SEED_SUPER_ADMIN_PASSWORD ?? randomPassword()
   await prisma.user.upsert({
-    where: { email: 'admin@loopwave.internal' },
+    where: { email: 'admin@loopwave.com' },
     create: {
-      name: 'Platform Admin',
-      email: 'admin@loopwave.internal',
+      name: 'Loopwave Platform Admin',
+      email: 'admin@loopwave.com',
       passwordHash: await hashPassword(superAdminPassword),
       platformRole: 'SUPER_ADMIN',
       avatarColor: '#181d2a',
     },
     update: {},
   })
-  console.log(`Super admin: admin@loopwave.internal / ${superAdminPassword} (change via SEED_SUPER_ADMIN_PASSWORD)`)
+  console.log(`Super admin: admin@loopwave.com / ${superAdminPassword} (override via SEED_SUPER_ADMIN_PASSWORD)`)
 
   // --- Demo tenant: Loopwave Demo Business ---
-  const demoPassword = process.env.SEED_DEMO_PASSWORD ?? 'Demo1234!'
+  const demoPassword = process.env.SEED_DEMO_PASSWORD ?? randomPassword()
   const owner = await prisma.user.upsert({
-    where: { email: 'aisha@loopwavedemo.com' },
-    create: { name: 'Aisha Rahman', email: 'aisha@loopwavedemo.com', passwordHash: await hashPassword(demoPassword), avatarColor: '#4a63f7' },
+    where: { email: 'aisha@loopwave.com' },
+    create: { name: 'Aisha Khan', email: 'aisha@loopwave.com', passwordHash: await hashPassword(demoPassword), avatarColor: '#4a63f7' },
     update: {},
   })
 
@@ -87,11 +100,11 @@ async function main() {
   })
 
   const teammates = [
-    { name: 'Daniel Cho', email: 'daniel@loopwavedemo.com', role: 'ADMIN' as const },
-    { name: 'Priya Nair', email: 'priya@loopwavedemo.com', role: 'MANAGER' as const },
-    { name: 'Marcus Lee', email: 'marcus@loopwavedemo.com', role: 'SALES_AGENT' as const },
-    { name: 'Fatima Al-Sayed', email: 'fatima@loopwavedemo.com', role: 'SUPPORT_AGENT' as const },
-    { name: 'Tom Becker', email: 'tom@loopwavedemo.com', role: 'VIEWER' as const },
+    { name: 'Daniel Cho', email: 'daniel@loopwave.com', role: 'ADMIN' as const },
+    { name: 'Priya Nair', email: 'priya@loopwave.com', role: 'MANAGER' as const },
+    { name: 'Marcus Lee', email: 'marcus@loopwave.com', role: 'SALES_AGENT' as const },
+    { name: 'Fatima Al-Sayed', email: 'fatima@loopwave.com', role: 'SUPPORT_AGENT' as const },
+    { name: 'Tom Becker', email: 'tom@loopwave.com', role: 'VIEWER' as const },
   ]
   const teamUsers = [owner]
   for (const mate of teammates) {
@@ -350,7 +363,7 @@ async function main() {
   })
 
   console.log('Seed complete.')
-  console.log(`Demo login: aisha@loopwavedemo.com / ${demoPassword} (change via SEED_DEMO_PASSWORD)`)
+  console.log(`Demo login: aisha@loopwave.com / ${demoPassword} (override via SEED_DEMO_PASSWORD)`)
 }
 
 main()

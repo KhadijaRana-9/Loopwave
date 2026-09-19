@@ -18,7 +18,7 @@ export const whatsappController = {
     res.json({ numbers: await whatsappService.listNumbers(tenantId(req)) })
   }),
   startSignup: asyncHandler(async (req: Request, res: Response) => {
-    const number = await whatsappService.startEmbeddedSignup(tenantId(req), req.body.label)
+    const number = await whatsappService.startEmbeddedSignup(tenantId(req), req.body.label, req.body.phoneNumber)
     res.status(201).json(number)
   }),
   disconnect: asyncHandler(async (req: Request, res: Response) => {

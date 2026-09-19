@@ -58,7 +58,7 @@ describe('multi-tenant isolation (IDOR)', () => {
     const formRes = await tenantA.agent.post('/api/forms').send({ name: 'Tenant A Form', fields: [] })
     formId = formRes.body.form.id
 
-    const whatsappRes = await tenantA.agent.post('/api/whatsapp/connect').send({ label: 'Tenant A Line' })
+    const whatsappRes = await tenantA.agent.post('/api/whatsapp/connect').send({ label: 'Tenant A Line', phoneNumber: `+1555${Date.now()}`.slice(0, 13) })
     whatsappNumberId = whatsappRes.body.id
 
     // No "start a conversation" endpoint exists yet (agents only reply to

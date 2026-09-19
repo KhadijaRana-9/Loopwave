@@ -28,7 +28,7 @@ export default function AdminDashboard() {
 
   return (
     <div>
-      <PageHeader title="Platform overview" description="Demo data — connect a backend for real tenant and revenue figures." />
+      <PageHeader title="Platform overview" description="Live tenant and revenue figures across every workspace on Loopwave." />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Total businesses" value={stats.totalBusinesses} icon={Building2} />

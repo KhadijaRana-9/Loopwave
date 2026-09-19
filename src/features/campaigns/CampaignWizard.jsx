@@ -11,11 +11,13 @@ import * as contactsService from '@/services/contactsService'
 import * as campaignsService from '@/services/campaignsService'
 import * as billingService from '@/services/billingService'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
+import { WHATSAPP_LANGUAGES } from '@/constants/whatsappLanguages'
+import LanguagePicker from '@/components/ui/LanguagePicker'
+import { renderPreviewText } from '@/utils/messagePreview'
 
 const STEPS = ['Compose', 'Audience', 'Preview', 'Schedule']
 
 const TONE_OPTIONS = ['Professional and engaging', 'Professional', 'Friendly and casual', 'Exciting and bold', 'Warm and appreciative']
-const LANGUAGE_CODES = { English: 'en_US', Hindi: 'hi_IN', Urdu: 'ur_PK', Arabic: 'ar', Spanish: 'es_ES', French: 'fr_FR' }
 
 const QUICK_ACTIONS = [
   { action: 'regenerate', label: 'Regenerate', icon: RefreshCw },
@@ -26,19 +28,6 @@ const QUICK_ACTIONS = [
   { action: 'remove_emojis', label: 'Remove emojis', icon: SmilePlus },
 ]
 
-const SAMPLE_VALUES = {
-  firstName: 'Aisha',
-  lastName: 'Khan',
-  name: 'Aisha Khan',
-  companyName: 'Your Business',
-  phone: '+91 98765 43210',
-  discount: '50%',
-  shopLink: 'https://yourshop.example/sale',
-}
-
-function renderPreviewText(text) {
-  return (text || '').replace(/\{\{\s*(\w+)\s*\}\}/g, (match, key) => SAMPLE_VALUES[key] ?? match)
-}
 
 function emptyFilters() {
   return { tags: [], sources: [], statuses: [] }
@@ -49,7 +38,7 @@ function toggle(list, value) {
 }
 
 function emptyBrief() {
-  return { topic: '', subheading: '', offer: '', tone: TONE_OPTIONS[0], language: 'English', cta: '', instructions: '' }
+  return { topic: '', subheading: '', offer: '', tone: TONE_OPTIONS[0], language: 'en', cta: '', instructions: '' }
 }
 
 export default function CampaignWizard({ open, onClose, onSubmit, submitting, submitError }) {
@@ -123,7 +112,14 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
   const overLimit = plan && plan.remaining !== -1 && resolvedCount !== null && resolvedCount > plan.remaining
 
   const composeMutation = useMutation({
-    mutationFn: (action) => campaignsService.composeAiMessage({ campaignName: name, ...brief, action, currentMessage: message || undefined }),
+    mutationFn: (action) =>
+      campaignsService.composeAiMessage({
+        campaignName: name,
+        ...brief,
+        language: WHATSAPP_LANGUAGES.find((l) => l.code === brief.language)?.name ?? 'English',
+        action,
+        currentMessage: message || undefined,
+      }),
     onSuccess: (result) => {
       setMessage(result.message)
       setHasGenerated(true)
@@ -184,7 +180,7 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
     }
     if (composeMode === 'ai') {
       payload.message = message
-      payload.language = LANGUAGE_CODES[brief.language] || 'en_US'
+      payload.language = brief.language || 'en_US'
     } else {
       payload.templateId = templateId
     }
@@ -257,11 +253,7 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
                       <option key={t}>{t}</option>
                     ))}
                   </Select>
-                  <Select id="brief-language" label="Language" value={brief.language} onChange={(e) => setBrief({ ...brief, language: e.target.value })}>
-                    {Object.keys(LANGUAGE_CODES).map((l) => (
-                      <option key={l}>{l}</option>
-                    ))}
-                  </Select>
+                  <LanguagePicker label="Language" value={brief.language} onChange={(code) => setBrief({ ...brief, language: code })} />
                   <div className="sm:col-span-2">
                     <Input
                       id="brief-instructions"

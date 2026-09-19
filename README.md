@@ -56,7 +56,7 @@ npm install
 npm run dev             # http://localhost:5173
 ```
 
-Log in with the credentials printed by `npm run seed` (defaults: `aisha@loopwavedemo.com` / `Demo1234!` for the business app, `admin@loopwave.internal` / `ChangeMe123!` for `/admin`).
+Log in with the credentials printed by `npm run seed` — a random password is generated each time unless `SEED_DEMO_PASSWORD`/`SEED_SUPER_ADMIN_PASSWORD` are set, for `aisha@loopwave.com` (business app) and `admin@loopwave.com` (`/admin`).
 
 ### 4. Background worker (optional)
 
