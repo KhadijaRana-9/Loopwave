@@ -1,8 +1,13 @@
 import clsx from 'clsx'
-import { forwardRef } from 'react'
+import { forwardRef, useId } from 'react'
 
 export const Input = forwardRef(function Input({ label, error, hint, className, id, 'aria-label': ariaLabel, ...props }, ref) {
-  const inputId = id || props.name
+  // Falls back to a generated id, not just `id || name` — a labeled input
+  // with neither prop set (several call sites across the app) used to
+  // render a visible <label> with no working htmlFor/id pair, so screen
+  // readers had no programmatic label at all (a real bug, caught by axe).
+  const generatedId = useId()
+  const inputId = id || props.name || generatedId
   // A visible <label> is the real fix, but several call sites are
   // intentionally label-less (inline search boxes, filter bars) — falling
   // back to the placeholder as the accessible name beats no name at all,
@@ -34,7 +39,8 @@ export const Input = forwardRef(function Input({ label, error, hint, className, 
 })
 
 export const Textarea = forwardRef(function Textarea({ label, error, hint, className, id, rows = 4, ...props }, ref) {
-  const inputId = id || props.name
+  const generatedId = useId()
+  const inputId = id || props.name || generatedId
   return (
     <div className="flex flex-col gap-1.5">
       {label && (
@@ -61,7 +67,8 @@ export const Textarea = forwardRef(function Textarea({ label, error, hint, class
 })
 
 export const Select = forwardRef(function Select({ label, error, className, id, children, 'aria-label': ariaLabel, ...props }, ref) {
-  const inputId = id || props.name
+  const generatedId = useId()
+  const inputId = id || props.name || generatedId
   return (
     <div className="flex flex-col gap-1.5">
       {label && (

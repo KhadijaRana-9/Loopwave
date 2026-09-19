@@ -6,7 +6,9 @@ const TONES = {
   success: 'bg-success-100 text-success-500',
   warning: 'bg-warning-100 text-warning-500',
   danger: 'bg-danger-100 text-danger-500',
-  info: 'bg-info-100 text-info-500',
+  // 700 not 500 — same reason `brand` above uses 700: info-500 on info-100
+  // fails WCAG AA contrast (confirmed via axe-core).
+  info: 'bg-info-100 text-info-700',
 }
 
 export default function Badge({ tone = 'neutral', children, className, dot = false }) {

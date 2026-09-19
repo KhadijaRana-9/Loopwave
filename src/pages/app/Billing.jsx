@@ -203,7 +203,7 @@ export default function Billing() {
               className={clsx('rounded-md px-3 py-1 text-xs font-medium capitalize transition-colors', period === p ? 'bg-brand-500 text-white' : 'text-ink-500 hover:text-ink-900')}
             >
               {p}
-              {p === 'yearly' && <span className="ml-1 text-[10px] opacity-80">2 months free</span>}
+              {p === 'yearly' && <span className={clsx('ml-1 text-[10px]', period === p ? 'text-white' : 'text-success-600')}>2 months free</span>}
             </button>
           ))}
         </div>

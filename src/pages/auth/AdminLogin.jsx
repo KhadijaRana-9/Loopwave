@@ -41,8 +41,9 @@ export default function AdminLogin() {
             Sign in with your Super Admin credentials to manage tenants, plans and system-wide settings.
           </p>
           <form onSubmit={handleSubmit} className="mt-5 flex flex-col gap-4">
-            <Input label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
+            <Input id="admin-email" label="Email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" required />
             <Input
+              id="admin-password"
               label="Password"
               type="password"
               value={password}
