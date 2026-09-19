@@ -80,7 +80,13 @@ export function verifyStripeSignature(rawBody: Buffer, signatureHeader: string |
   const parts = Object.fromEntries(signatureHeader.split(',').map((p) => p.split('=') as [string, string]))
   if (!parts.t || !parts.v1) return false
   const expected = crypto.createHmac('sha256', env.STRIPE_WEBHOOK_SECRET).update(`${parts.t}.${rawBody.toString()}`).digest('hex')
-  return crypto.timingSafeEqual(Buffer.from(expected), Buffer.from(parts.v1))
+  const expectedBuf = Buffer.from(expected)
+  const receivedBuf = Buffer.from(parts.v1)
+  // timingSafeEqual throws on mismatched lengths rather than returning false —
+  // a malformed/truncated signature would otherwise crash into a 500 instead
+  // of the clean 401 a bad signature should produce.
+  if (expectedBuf.length !== receivedBuf.length) return false
+  return crypto.timingSafeEqual(expectedBuf, receivedBuf)
 }
 
 // Schedules (or unschedules) cancellation at the end of the current billing

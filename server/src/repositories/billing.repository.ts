@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/config/prisma.js'
 import type { InvoiceStatus, SubscriptionStatus } from '@prisma/client'
 
@@ -6,6 +7,35 @@ const TRIAL_PLAN_ID = 'trial'
 function periodEndFor(billingCycle: string, from = new Date()): Date {
   const days = billingCycle === 'yearly' ? 365 : 30
   return new Date(from.getTime() + days * 86_400_000)
+}
+
+function isUniqueConstraintError(err: unknown): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002'
+}
+
+// Invoice.number is globally unique, so the sequence driving it has to be
+// counted globally too — counting per-subscription (as this used to) meant
+// any two different tenants' first invoice both landed on e.g.
+// "SANDBOX-2026-0001" and the second one's insert failed outright. Counts
+// per prefix+year rather than the whole table so sandbox/real numbering
+// stay in their own independent series, and retries on an actual collision
+// (a genuinely concurrent request landing between the count and the
+// insert) instead of assuming the count alone guarantees uniqueness.
+async function createInvoiceWithNumber(prefix: string, data: { subscriptionId: string; amount: number; status: InvoiceStatus; providerRef?: string | null; issuedAt: Date }) {
+  const year = new Date().getFullYear()
+  const numberPrefix = `${prefix}-${year}-`
+  let attempt = await prisma.invoice.count({ where: { number: { startsWith: numberPrefix } } })
+
+  for (let tries = 0; tries < 5; tries++) {
+    const number = `${numberPrefix}${String(attempt + 1).padStart(4, '0')}`
+    try {
+      return await prisma.invoice.create({ data: { ...data, number } })
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err
+      attempt += 1
+    }
+  }
+  throw new Error(`Could not allocate a unique invoice number with prefix ${numberPrefix} after 5 attempts`)
 }
 
 export const billingRepository = {
@@ -37,17 +67,8 @@ export const billingRepository = {
     })
   },
 
-  async createSandboxInvoice(subscriptionId: string, amount: number) {
-    const count = await prisma.invoice.count({ where: { subscriptionId } })
-    return prisma.invoice.create({
-      data: {
-        subscriptionId,
-        number: `SANDBOX-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`,
-        amount,
-        status: 'PAID',
-        issuedAt: new Date(),
-      },
-    })
+  createSandboxInvoice(subscriptionId: string, amount: number) {
+    return createInvoiceWithNumber('SANDBOX', { subscriptionId, amount, status: 'PAID', issuedAt: new Date() })
   },
 
   // Only path that ever activates a paid plan for real — called exclusively
@@ -71,11 +92,8 @@ export const billingRepository = {
   // Real, sequential invoice numbers for actual provider-confirmed payments
   // — kept separate from the honestly-labeled "SANDBOX-" series above so the
   // two can never be confused in the billing history table.
-  async recordRealInvoice(subscriptionId: string, amount: number, status: InvoiceStatus, providerRef: string | null) {
-    const count = await prisma.invoice.count({ where: { subscriptionId } })
-    return prisma.invoice.create({
-      data: { subscriptionId, number: `INV-${new Date().getFullYear()}-${String(count + 1).padStart(4, '0')}`, amount, status, providerRef, issuedAt: new Date() },
-    })
+  recordRealInvoice(subscriptionId: string, amount: number, status: InvoiceStatus, providerRef: string | null) {
+    return createInvoiceWithNumber('INV', { subscriptionId, amount, status, providerRef, issuedAt: new Date() })
   },
 
   markPastDue(tenantId: string) {
