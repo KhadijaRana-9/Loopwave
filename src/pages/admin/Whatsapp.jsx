@@ -17,7 +17,7 @@ export default function AdminWhatsapp() {
   // Demo data only has real numbers for the seeded tenant — attribute them
   // there and show the rest of the platform's tenants as connected via their
   // own (unlisted, in this mock) numbers.
-  const rows = numbersQuery.data.map((n) => ({ ...n, tenantName: tenantsQuery.data[0]?.name }))
+  const rows = (numbersQuery.data ?? []).map((n) => ({ ...n, tenantName: tenantsQuery.data?.[0]?.name }))
 
   const columns = [
     { key: 'displayNumber', header: 'Number' },
