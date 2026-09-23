@@ -2,13 +2,15 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { AreaChart, Area, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from 'recharts'
-import { MessageSquare, Users, Inbox as InboxIcon, TrendingUp, Bot, Megaphone } from 'lucide-react'
+import { MessageSquare, Users, Inbox as InboxIcon, TrendingUp, Bot, Megaphone, AlertTriangle } from 'lucide-react'
 import PageHeader from '@/components/ui/PageHeader'
 import StatCard from '@/components/ui/StatCard'
 import Card, { CardHeader } from '@/components/ui/Card'
 import { Select } from '@/components/ui/Input'
 import Spinner from '@/components/ui/Spinner'
 import UsageMeter from '@/components/ui/UsageMeter'
+import EmptyState from '@/components/ui/EmptyState'
+import Button from '@/components/ui/Button'
 import { listContacts } from '@/services/contactsService'
 import { listConversations } from '@/services/conversationsService'
 import { listCampaigns } from '@/services/campaignsService'
@@ -32,6 +34,37 @@ export default function Dashboard() {
     contactsQuery.isLoading || conversationsQuery.isLoading || campaignsQuery.isLoading || messagingQuery.isLoading || subscriptionQuery.isLoading
 
   if (loading) return <Spinner label="Loading dashboard..." />
+
+  // messaging/subscription are consumed as objects below (messaging.sent,
+  // subscription.plan.name, ...), not lists — a plain ?? [] fallback isn't
+  // enough to stop a failed request from throwing mid-render. With no
+  // ErrorBoundary anywhere in the app, that throw unmounts the whole tree
+  // and leaves a blank page, so bail out to a retryable empty state instead.
+  const hasError =
+    contactsQuery.isError || conversationsQuery.isError || campaignsQuery.isError || messagingQuery.isError || subscriptionQuery.isError
+
+  if (hasError) {
+    return (
+      <EmptyState
+        icon={AlertTriangle}
+        title="Couldn't load your dashboard"
+        description="Something went wrong fetching your workspace data. Check your connection and try again."
+        action={
+          <Button
+            onClick={() => {
+              contactsQuery.refetch()
+              conversationsQuery.refetch()
+              campaignsQuery.refetch()
+              messagingQuery.refetch()
+              subscriptionQuery.refetch()
+            }}
+          >
+            Retry
+          </Button>
+        }
+      />
+    )
+  }
 
   const contacts = contactsQuery.data ?? []
   const conversations = conversationsQuery.data ?? []
