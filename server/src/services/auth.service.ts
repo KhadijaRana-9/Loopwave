@@ -1,6 +1,7 @@
 import { prisma } from '@/config/prisma.js'
 import { authRepository } from '@/repositories/auth.repository.js'
 import { teamRepository } from '@/repositories/team.repository.js'
+import { platformSettingsRepository } from '@/repositories/platformSettings.repository.js'
 import { hashPassword, verifyPassword } from '@/utils/password.js'
 import { generateRefreshToken, hashRefreshToken, refreshTokenExpiry, signAccessToken } from '@/utils/jwt.js'
 import { ApiError } from '@/utils/apiError.js'
@@ -62,11 +63,13 @@ export const authService = {
     const passwordHash = await hashPassword(input.password)
     const user = await authRepository.createUser({ name: input.name, email: input.email, passwordHash })
     const slug = await uniqueSlug(input.workspaceName)
+    const { trialDays } = await platformSettingsRepository.get()
     const { tenant: tenantRow, membership, subscription } = await authRepository.createTenantWithOwner({
       tenantName: input.workspaceName,
       slug,
       userId: user.id,
       planId: 'trial',
+      trialDays,
     })
     const tenant = { ...tenantRow, subscription }
 

@@ -1,9 +1,10 @@
 import { adminRepository } from '@/repositories/admin.repository.js'
+import { platformSettingsRepository } from '@/repositories/platformSettings.repository.js'
 import { getUsageSnapshot } from '@/services/usage.service.js'
 import { serializeAiAgent, serializePlan, serializeTeamMember } from '@/utils/serializers.js'
 import { ApiError } from '@/utils/apiError.js'
 import type { z } from 'zod'
-import type { createPlanSchema, updatePlanSchema } from '@/validators/admin.validators.js'
+import type { createPlanSchema, updatePlanSchema, updatePlatformSettingsSchema } from '@/validators/admin.validators.js'
 
 export const adminService = {
   async listTenants() {
@@ -87,6 +88,16 @@ export const adminService = {
       converted: c.events.filter((e) => e.type === 'converted').length,
       createdAt: c.createdAt,
     }))
+  },
+
+  async getSettings() {
+    const settings = await platformSettingsRepository.get()
+    return { platformName: settings.platformName, supportEmail: settings.supportEmail, trialDays: settings.trialDays }
+  },
+
+  async updateSettings(input: z.infer<typeof updatePlatformSettingsSchema>) {
+    const updated = await platformSettingsRepository.update(input)
+    return { platformName: updated.platformName, supportEmail: updated.supportEmail, trialDays: updated.trialDays }
   },
 
   async listSystemLogs() {

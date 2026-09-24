@@ -28,4 +28,9 @@ export const campaignsController = {
   compose: asyncHandler(async (req: Request, res: Response) => {
     res.json(await campaignsService.composeMessage(tenantId(req), req.body))
   }),
+  uploadHeaderMedia: asyncHandler(async (req: Request, res: Response) => {
+    const file = (req as Request & { file?: Express.Multer.File }).file
+    if (!file) throw ApiError.badRequest('No file uploaded')
+    res.json(await campaignsService.uploadHeaderMedia(tenantId(req), { buffer: file.buffer, mimeType: file.mimetype, filename: file.originalname }))
+  }),
 }

@@ -1,6 +1,8 @@
 import request from 'supertest'
 import { createApp } from '@/app.js'
 import { prisma } from '@/config/prisma.js'
+import crypto from 'node:crypto'
+import { env, integrationReadiness } from '@/config/env.js'
 
 // Real integration tests: real Express app, real Prisma client, real
 // database (whatever DATABASE_URL in server/.env points at). Nothing here
@@ -65,4 +67,45 @@ export async function cleanupTenant(session: TestSession | null | undefined) {
 export async function cleanupUser(session: TestSession | null | undefined) {
   if (!session) return
   await prisma.user.deleteMany({ where: { id: session.userId } })
+}
+
+// The controller deliberately responds 200 BEFORE processing finishes (Meta
+// retries webhooks that aren't acked fast — whatsapp.controller.ts#receiveWebhook),
+// so a test that asserts on DB state must wait for the async processing, not
+// just the HTTP response. It polls the same WebhookEvent row the controller
+// stamps (processedAt / errorMessage) when it is done. The generous timeout is
+// deliberate: processing is ~10 sequential queries and this suite runs against
+// a remote Neon database at ~0.5s/query — a short timeout here made tests end
+// (and afterAll delete the tenant) while processing was still in flight,
+// producing spurious foreign-key errors.
+export async function waitForWhatsappWebhookProcessed(externalId: string, timeoutMs = 25_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const event = await prisma.webhookEvent.findUnique({ where: { source_externalId: { source: 'whatsapp', externalId } } })
+    if (event?.processedAt || event?.errorMessage) return event
+    await new Promise((r) => setTimeout(r, 100))
+  }
+  throw new Error(`WhatsApp webhook event ${externalId} was not processed within ${timeoutMs}ms`)
+}
+
+// POSTs a genuinely HMAC-signed webhook (same scheme Meta uses:
+// X-Hub-Signature-256 = sha256(rawBody, WHATSAPP_APP_SECRET)) and waits for
+// processing to finish. WHATSAPP_APP_SECRET is a fixture set in vitest.config.ts.
+export async function signedWhatsappWebhookPost(payload: { entry: Array<{ id: string; [key: string]: unknown }> }) {
+  const body = JSON.stringify(payload)
+  const signature = 'sha256=' + crypto.createHmac('sha256', env.WHATSAPP_APP_SECRET).update(body).digest('hex')
+  const res = await request(app).post('/api/whatsapp/webhook').set('Content-Type', 'application/json').set('x-hub-signature-256', signature).send(body)
+  // entry[0] always exists by construction at every call site.
+  if (res.status === 200) await waitForWhatsappWebhookProcessed(payload.entry[0]!.id)
+  return res
+}
+
+// Gate for the "real Graph API" half of a WhatsApp test — true only when
+// META_APP_ID/META_CONFIG_ID/WHATSAPP_APP_SECRET are genuinely configured
+// (see src/config/env.ts#integrationReadiness). No real credentials exist
+// in this environment today, so describe.skipIf(!hasLiveWhatsappCredentials())
+// blocks currently skip — they start running the moment real credentials
+// are added, rather than being deleted or left permanently unwritten.
+export function hasLiveWhatsappCredentials(): boolean {
+  return integrationReadiness.whatsappSignup
 }

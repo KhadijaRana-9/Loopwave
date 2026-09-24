@@ -16,6 +16,8 @@ export const adminController = {
     const plan = await adminService.createPlan(req.body)
     res.status(201).json({ plan })
   }),
+  getSettings: asyncHandler(async (_req: Request, res: Response) => res.json({ settings: await adminService.getSettings() })),
+  updateSettings: asyncHandler(async (req: Request, res: Response) => res.json({ settings: await adminService.updateSettings(req.body) })),
   systemLogs: asyncHandler(async (_req: Request, res: Response) => res.json({ logs: await adminService.listSystemLogs() })),
   tenantUsage: asyncHandler(async (req: Request, res: Response) => res.json(await adminService.getTenantUsage(req.params.id as string))),
   aiAgents: asyncHandler(async (_req: Request, res: Response) => res.json({ agents: await adminService.listAiAgentsAcrossTenants() })),

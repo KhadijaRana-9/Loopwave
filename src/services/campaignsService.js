@@ -38,3 +38,12 @@ export async function composeAiMessage(payload) {
 export async function previewAudience(audienceFilter) {
   return apiClient.post('/campaigns/audience/preview', { audienceFilter })
 }
+
+// Uploads the ONE media file a template header needs — every recipient's
+// send reuses this same Meta media handle. Requires a real connected
+// WhatsApp number (server/src/services/campaigns.service.ts#uploadHeaderMedia).
+export async function uploadHeaderMedia(file) {
+  const form = new FormData()
+  form.append('file', file)
+  return apiClient.postForm('/campaigns/header-media', form)
+}

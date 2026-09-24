@@ -2,13 +2,15 @@ import { z } from 'zod'
 
 export const whatsappNumberIdParamSchema = z.object({ id: z.string().min(1) })
 
-// E.164: a leading +, first digit 1-9 (no leading 0), 1-14 more digits (max
-// 15 total, the international standard). The frontend formats/validates
-// per-country via libphonenumber-js for good UX, but the backend is what
-// actually enforces this — it never trusts a client-formatted string.
-const E164 = /^\+[1-9]\d{7,14}$/
-
-export const startSignupSchema = z.object({
+// Meta's Embedded Signup hands back the wabaId/phoneNumberId via its
+// postMessage event and an authorization `code` via FB.login — the backend
+// re-verifies all of it against the Graph API before trusting any of it
+// (see whatsapp.service.ts#completeEmbeddedSignup). businessId is optional:
+// Meta's own /waba lookup usually resolves it, this is only a fallback.
+export const completeSignupSchema = z.object({
+  code: z.string().trim().min(1, 'Missing Meta authorization code'),
+  wabaId: z.string().trim().min(1, 'Missing WhatsApp Business Account id'),
+  phoneNumberId: z.string().trim().min(1, 'Missing phone number id'),
+  businessId: z.string().trim().optional(),
   label: z.string().trim().min(1).max(120),
-  phoneNumber: z.string().trim().regex(E164, 'Enter a valid phone number in international format, e.g. +923001234567'),
 })

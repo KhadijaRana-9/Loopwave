@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Search, Send, Sparkles, Paperclip, FileText, Tag, User, Clock, ArrowLeft, Info, X } from 'lucide-react'
+import { Search, Send, Paperclip, FileText, Tag, User, Clock, ArrowLeft, Info, X } from 'lucide-react'
 import clsx from 'clsx'
 import Avatar from '@/components/ui/Avatar'
 import Badge from '@/components/ui/Badge'
@@ -14,6 +14,7 @@ import * as teamService from '@/services/teamService'
 import * as templatesService from '@/services/templatesService'
 import { getSocket } from '@/services/socket'
 import { useAuthStore } from '@/store/authStore'
+import { toast } from '@/store/toastStore'
 
 const STATUS_TABS = [
   { value: 'all', label: 'All' },
@@ -21,19 +22,6 @@ const STATUS_TABS = [
   { value: 'pending', label: 'Pending' },
   { value: 'resolved', label: 'Resolved' },
 ]
-
-// Canned suggestions so "AI assist" produces a real, context-aware draft
-// instead of doing nothing — a stand-in for a real LLM-backed reply endpoint.
-const AI_SUGGESTIONS = [
-  { match: /pric|cost|plan/i, reply: "Sure! Our plans start at ₹999/mo — I'll send over the full pricing breakdown now." },
-  { match: /catalog|product/i, reply: 'Absolutely, here is our latest product catalog — let me know if anything stands out.' },
-  { match: /demo|call/i, reply: 'Happy to set that up — does tomorrow afternoon work for a quick call?' },
-  { match: /thank/i, reply: "You're welcome! Let us know if anything else comes up." },
-]
-function suggestReply(lastInboundText) {
-  const hit = AI_SUGGESTIONS.find((s) => s.match.test(lastInboundText ?? ''))
-  return hit?.reply ?? "Thanks for reaching out — could you share a bit more detail so I can help?"
-}
 
 export default function Inbox() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -88,6 +76,14 @@ export default function Inbox() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
   })
 
+  // Real upload — a real WhatsApp media message, never a text message with
+  // a paperclip emoji standing in for the actual file.
+  const sendMediaMutation = useMutation({
+    mutationFn: ({ id, file, caption }) => conversationsService.sendMedia(id, file, caption),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
+    onError: (err) => toast.error(err.message || 'Could not send this file'),
+  })
+
   const assignMutation = useMutation({
     mutationFn: ({ id, agentId }) => conversationsService.assignConversation(id, agentId),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['conversations'] }),
@@ -113,8 +109,11 @@ export default function Inbox() {
 
   function handleSend() {
     if ((!messageText.trim() && !attachment) || !active) return
-    const text = attachment ? `${messageText.trim() ? messageText.trim() + ' ' : ''}📎 ${attachment.name}` : messageText.trim()
-    sendMutation.mutate({ id: active.id, text })
+    if (attachment) {
+      sendMediaMutation.mutate({ id: active.id, file: attachment, caption: messageText.trim() || undefined })
+    } else {
+      sendMutation.mutate({ id: active.id, text: messageText.trim() })
+    }
     setMessageText('')
     setAttachment(null)
   }
@@ -122,11 +121,6 @@ export default function Inbox() {
   function insertTemplate(template) {
     setMessageText(template.body.replace(/\{\{\d+\}\}/g, '___'))
     setShowTemplates(false)
-  }
-
-  function handleAiAssist() {
-    const lastInbound = [...(active?.messages ?? [])].reverse().find((m) => m.direction === 'inbound')
-    setMessageText(suggestReply(lastInbound?.text))
   }
 
   function agentName(id) {
@@ -267,9 +261,27 @@ export default function Inbox() {
                       msg.direction === 'outbound' ? 'bg-brand-500 text-white' : 'bg-ink-100 text-ink-800',
                     )}
                   >
+                    {msg.mediaUrl && msg.type === 'image' && (
+                      <img src={msg.mediaUrl} alt={msg.mediaFileName ?? 'Sent image'} className="mb-1.5 max-h-64 w-full rounded-lg object-cover" />
+                    )}
+                    {msg.mediaUrl && msg.type === 'video' && <video controls src={msg.mediaUrl} className="mb-1.5 max-h-64 w-full rounded-lg" />}
+                    {msg.mediaUrl && msg.type === 'document' && (
+                      <a
+                        href={msg.mediaUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className={clsx(
+                          'mb-1.5 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs underline',
+                          msg.direction === 'outbound' ? 'border-white/30' : 'border-ink-200',
+                        )}
+                      >
+                        <FileText className="h-3.5 w-3.5 shrink-0" /> {msg.mediaFileName ?? 'Document'}
+                      </a>
+                    )}
                     {msg.text}
-                    <div className={clsx('mt-1 text-[10px]', msg.direction === 'outbound' ? 'text-white' : 'text-ink-500')}>
+                    <div className={clsx('mt-1 flex items-center gap-1.5 text-[10px]', msg.direction === 'outbound' ? 'text-white' : 'text-ink-500')}>
                       {new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {msg.status}
+                      {msg.demo && <span title="No real WhatsApp number was connected when this was sent — simulated, not delivered by Meta.">· simulated</span>}
                     </div>
                   </div>
                 </div>
@@ -317,9 +329,6 @@ export default function Inbox() {
                 <button onClick={() => fileInputRef.current?.click()} className="rounded-lg p-2 text-ink-400 hover:bg-ink-100" title="Attach media" aria-label="Attach media">
                   <Paperclip className="h-4.5 w-4.5" />
                 </button>
-                <button onClick={handleAiAssist} className="rounded-lg p-2 text-brand-500 hover:bg-brand-50" title="AI assist: suggest a reply" aria-label="AI assist: suggest a reply">
-                  <Sparkles className="h-4.5 w-4.5" />
-                </button>
                 <textarea
                   value={messageText}
                   onChange={(e) => setMessageText(e.target.value)}
@@ -333,7 +342,7 @@ export default function Inbox() {
                   placeholder="Type a message..."
                   className="max-h-32 flex-1 resize-none rounded-lg border border-ink-200 px-3 py-2 text-sm outline-none focus:border-brand-500"
                 />
-                <Button onClick={handleSend} loading={sendMutation.isPending} size="icon" aria-label="Send message">
+                <Button onClick={handleSend} loading={sendMutation.isPending || sendMediaMutation.isPending} size="icon" aria-label="Send message">
                   <Send className="h-4 w-4" />
                 </Button>
               </div>

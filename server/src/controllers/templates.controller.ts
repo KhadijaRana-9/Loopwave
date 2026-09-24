@@ -25,6 +25,10 @@ export const templatesController = {
     const template = await templatesService.submitForReview(tenantId(req), req.params.id as string)
     res.json({ template: serializeTemplate(template) })
   }),
+  sync: asyncHandler(async (req: Request, res: Response) => {
+    const result = await templatesService.syncFromMeta(tenantId(req))
+    res.json(result)
+  }),
   remove: asyncHandler(async (req: Request, res: Response) => {
     await templatesService.remove(tenantId(req), req.params.id as string)
     res.status(204).send()

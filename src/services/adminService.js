@@ -38,6 +38,16 @@ export async function createPlan(data) {
   return plan
 }
 
+export async function getPlatformSettings() {
+  const { settings } = await apiClient.get('/admin/settings')
+  return settings
+}
+
+export async function updatePlatformSettings(patch) {
+  const { settings } = await apiClient.patch('/admin/settings', patch)
+  return settings
+}
+
 export async function listSystemLogs() {
   const { logs } = await apiClient.get('/admin/system-logs')
   return logs

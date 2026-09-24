@@ -23,17 +23,20 @@ async function tryRefresh() {
   return res.ok
 }
 
-async function request(path, { method = 'GET', body, retryOn401 = true } = {}) {
+async function request(path, { method = 'GET', body, isFormData = false, retryOn401 = true } = {}) {
+  // FormData (file uploads) must NOT be JSON-stringified or given an
+  // explicit Content-Type — fetch/the browser sets the multipart boundary
+  // itself, and stringifying a FormData object silently sends "{}".
   const res = await fetch(`${API_BASE_URL}${path}`, {
     method,
     credentials: 'include', // send/receive the httpOnly session cookies
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
+    headers: body && !isFormData ? { 'Content-Type': 'application/json' } : undefined,
+    body: isFormData ? body : body ? JSON.stringify(body) : undefined,
   })
 
   if (res.status === 401 && retryOn401 && path !== '/auth/refresh' && path !== '/auth/login') {
     const refreshed = await tryRefresh()
-    if (refreshed) return request(path, { method, body, retryOn401: false })
+    if (refreshed) return request(path, { method, body, isFormData, retryOn401: false })
   }
 
   if (res.status === 204) return null
@@ -62,4 +65,7 @@ export const apiClient = {
   post: (path, body) => request(path, { method: 'POST', body }),
   patch: (path, body) => request(path, { method: 'PATCH', body }),
   delete: (path) => request(path, { method: 'DELETE' }),
+  // formData: a browser FormData instance — used for real file uploads
+  // (WhatsApp media, campaign header media). Never JSON-encoded.
+  postForm: (path, formData) => request(path, { method: 'POST', body: formData, isFormData: true }),
 }

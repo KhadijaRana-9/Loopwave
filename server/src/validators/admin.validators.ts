@@ -20,3 +20,9 @@ export const createPlanSchema = z.object({
   billingCycle: z.string().default('monthly'),
   limits: z.record(z.string(), z.number()).default({}),
 })
+
+export const updatePlatformSettingsSchema = z.object({
+  platformName: z.string().trim().min(1).max(120).optional(),
+  supportEmail: z.string().trim().email().or(z.literal('')).optional(),
+  trialDays: z.number().int().min(1).max(365).optional(),
+})

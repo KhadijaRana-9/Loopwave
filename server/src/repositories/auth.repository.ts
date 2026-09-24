@@ -38,14 +38,14 @@ export const authRepository = {
     return prisma.user.create({ data })
   },
 
-  createTenantWithOwner(params: { tenantName: string; slug: string; userId: string; planId: string }) {
+  createTenantWithOwner(params: { tenantName: string; slug: string; userId: string; planId: string; trialDays: number }) {
     return prisma.$transaction(async (tx) => {
       const tenant = await tx.tenant.create({
         data: {
           name: params.tenantName,
           slug: params.slug,
           status: 'TRIAL',
-          trialEndsAt: new Date(Date.now() + 14 * 86_400_000),
+          trialEndsAt: new Date(Date.now() + params.trialDays * 86_400_000),
         },
       })
 
@@ -74,7 +74,7 @@ export const authRepository = {
         data: defaultStages.map((s, i) => ({ pipelineId: pipeline.id, key: s.key, label: s.label, order: i })),
       })
 
-      await tx.whatsAppAccount.create({ data: { tenantId: tenant.id, isDemoMode: true } })
+      await tx.whatsAppAccount.create({ data: { tenantId: tenant.id } })
 
       return { tenant, membership, subscription }
     })

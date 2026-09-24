@@ -6,6 +6,7 @@ import Avatar from '@/components/ui/Avatar'
 import Badge from '@/components/ui/Badge'
 import GlobalSearch from '@/features/search/GlobalSearch'
 import NotificationBell from '@/features/notifications/NotificationBell'
+import WhatsappReauthBanner from '@/features/whatsapp/WhatsappReauthBanner'
 import { APP_NAV } from '@/constants/navigation'
 import { usePermission } from '@/hooks/usePermission'
 import { useAuthStore } from '@/store/authStore'
@@ -138,6 +139,8 @@ export default function AppLayout() {
             </button>
           </div>
         </header>
+
+        <WhatsappReauthBanner />
 
         <main className="flex-1 overflow-y-auto p-4 sm:p-6">
           <Outlet />

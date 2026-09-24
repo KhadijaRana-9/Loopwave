@@ -47,7 +47,7 @@ export default function TestConversationModal({ open, onClose, agent }) {
 
     sendMutation.mutate(text, {
       onSuccess: (result) => {
-        setMessages((m) => [...m, { id: generateId('m'), from: 'agent', text: result.reply }])
+        setMessages((m) => [...m, { id: generateId('m'), from: 'agent', text: result.reply, demo: result.demo }])
         if (/lead score:/i.test(result.reply)) setDone(true)
       },
       onError: () => {
@@ -57,7 +57,7 @@ export default function TestConversationModal({ open, onClose, agent }) {
   }
 
   return (
-    <Modal open={open} onClose={handleClose} title={`Test: ${agent.name}`} description="Simulated using this agent's own configured questions and FAQs." size="md">
+    <Modal open={open} onClose={handleClose} title={`Test: ${agent.name}`} description="Each reply is labeled as a real AI reply or a simulated one built from this agent's own configured questions and FAQs." size="md">
       <div className="flex h-96 flex-col">
         <div className="flex-1 space-y-3 overflow-y-auto rounded-lg bg-ink-50 p-3">
           {messages.map((m) => (
@@ -65,7 +65,7 @@ export default function TestConversationModal({ open, onClose, agent }) {
               <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${m.from === 'user' ? 'bg-brand-500 text-white' : 'bg-white text-ink-800 shadow-sm'}`}>
                 {m.from === 'agent' && (
                   <div className="mb-1 flex items-center gap-1 text-[10px] font-medium text-purple-600">
-                    <Sparkles className="h-3 w-3" /> AI
+                    <Sparkles className="h-3 w-3" /> {m.demo === true ? 'Simulated reply (no AI provider configured)' : m.demo === false ? 'AI' : 'Greeting'}
                   </div>
                 )}
                 {m.text}

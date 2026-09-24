@@ -324,7 +324,7 @@ async function main() {
   // --- WhatsApp account (demo mode, no real Meta credentials) ---
   const existingWa = await prisma.whatsAppAccount.findFirst({ where: { tenantId: tenant.id } })
   if (!existingWa) {
-    const wa = await prisma.whatsAppAccount.create({ data: { tenantId: tenant.id, isDemoMode: true } })
+    const wa = await prisma.whatsAppAccount.create({ data: { tenantId: tenant.id } })
     await prisma.whatsAppPhoneNumber.create({
       data: { accountId: wa.id, displayNumber: '+91 98765 40001', label: 'Primary Business Line', status: 'PENDING_VERIFICATION' },
     })

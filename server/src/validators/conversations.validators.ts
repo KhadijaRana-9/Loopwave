@@ -2,6 +2,8 @@ import { z } from 'zod'
 
 export const conversationIdParamSchema = z.object({ id: z.string().min(1) })
 
+export const messageIdParamSchema = z.object({ messageId: z.string().min(1) })
+
 export const listConversationsQuerySchema = z.object({
   status: z.enum(['open', 'pending', 'resolved']).optional(),
   assignedAgentId: z.string().trim().optional(),

@@ -9,5 +9,19 @@
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
+    <!--
+      Meta's Embedded Signup SDK. appId is supplied at runtime (not baked in
+      here) by src/services/whatsappService.js#getSignupConfig, which reads
+      it from the backend's GET /whatsapp/signup-config — that endpoint only
+      returns a real appId when the platform has META_APP_ID configured, so
+      FB.init only ever runs with a real value, never a placeholder.
+    -->
+    <script>
+      window.fbAsyncInit = function () {
+        window.__fbSdkReady = true
+        window.dispatchEvent(new Event('fb-sdk-ready'))
+      }
+    </script>
+    <script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js"></script>
   </body>
 </html>

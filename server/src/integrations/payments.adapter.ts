@@ -1,11 +1,15 @@
 import crypto from 'node:crypto'
 import { env, integrationReadiness } from '@/config/env.js'
 
-export type PaymentProvider = 'stripe' | 'razorpay'
+// Stripe is the only implemented provider — Razorpay was previously
+// advertised via env vars/a readiness flag with no actual checkout/webhook
+// code behind it (a tenant configuring Razorpay keys would silently fall
+// back to sandbox instead of getting a real integration or a clear error).
+// Removed until there's a real implementation to back it.
+export type PaymentProvider = 'stripe'
 
 export function activeProvider(): PaymentProvider | null {
   if (integrationReadiness.stripe) return 'stripe'
-  if (integrationReadiness.razorpay) return 'razorpay'
   return null
 }
 

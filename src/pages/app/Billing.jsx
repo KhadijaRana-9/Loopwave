@@ -169,7 +169,7 @@ export default function Billing() {
           {subscription.sandbox ? (
             <>
               <p className="text-sm text-ink-500">No payment method on file (demo).</p>
-              <Button variant="outline" size="sm" className="mt-3 w-full justify-center" onClick={() => toast.info('Demo: connect Stripe/Razorpay to add a payment method.')}>
+              <Button variant="outline" size="sm" className="mt-3 w-full justify-center" onClick={() => toast.info('Demo: connect Stripe to add a payment method.')}>
                 Add payment method
               </Button>
             </>

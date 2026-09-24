@@ -1,13 +1,19 @@
 import { randomUUID } from 'node:crypto'
 import { campaignsRepository } from '@/repositories/campaigns.repository.js'
+import { whatsappRepository } from '@/repositories/whatsapp.repository.js'
 import { sendWhatsAppMessage, scheduleDemoRecipientProgression } from '@/integrations/whatsapp.adapter.js'
+import * as metaGraph from '@/integrations/metaGraph.js'
 import { generateCampaignMessage } from '@/integrations/ai.adapter.js'
+import { uploadObject, getSignedReadUrl, mediaObjectKey, isStorageConfigured } from '@/integrations/storage.adapter.js'
+import { assertMediaAllowed } from '@/utils/mediaLimits.js'
+import { assertTemplateApproved, assertContactOptedIn } from '@/services/whatsappCompliance.service.js'
 import { recordUsage } from '@/services/usage.service.js'
 import { assertUsageAllowance } from '@/services/planLimits.service.js'
 import { notifyTenant } from '@/services/notifications.service.js'
 import { enqueueCampaignSend, removeCampaignSend } from '@/jobs/campaigns.queue.js'
 import { serializeTemplate } from '@/utils/serializers.js'
-import { resolveMessageVariables, extractVariables, unresolvableVariables } from '@/utils/messageVariables.js'
+import { resolveVariableValues, extractVariables, unresolvableVariables } from '@/utils/messageVariables.js'
+import { decryptSecret } from '@/utils/crypto.js'
 import { ApiError } from '@/utils/apiError.js'
 import { prisma } from '@/config/prisma.js'
 import type { z } from 'zod'
@@ -25,6 +31,8 @@ async function serialize(campaign: CampaignWithTemplate) {
     template: serializeTemplate(campaign.template),
     status: campaign.status.toLowerCase(),
     audienceFilter: campaign.audienceFilter,
+    headerMediaUrl: campaign.headerMediaUrl,
+    headerMediaMimeType: campaign.headerMediaMimeType,
     scheduledAt: campaign.scheduledAt,
     startedAt: campaign.startedAt,
     completedAt: campaign.completedAt,
@@ -34,19 +42,73 @@ async function serialize(campaign: CampaignWithTemplate) {
   }
 }
 
+function headerMediaParameter(campaign: Pick<Campaign, 'headerMediaMetaId' | 'headerMediaMimeType'>) {
+  if (!campaign.headerMediaMetaId || !campaign.headerMediaMimeType) return null
+  const kind = campaign.headerMediaMimeType.startsWith('image/') ? 'image' : campaign.headerMediaMimeType.startsWith('video/') ? 'video' : 'document'
+  return { type: 'header' as const, parameters: [{ type: kind, [kind]: { id: campaign.headerMediaMetaId } }] }
+}
+
 // Actually delivers the campaign: fetches every still-pending recipient,
-// sends through the WhatsApp adapter (real Cloud API if configured, an
-// honestly-labeled demo simulation otherwise), and persists a real status
-// per recipient — nothing here is a fabricated success count. Exported so
-// both the in-process fallback below and the BullMQ worker (jobs/campaign.worker.ts)
-// call the exact same delivery logic.
+// sends through the WhatsApp adapter (real Cloud API — as an actual
+// `type: template` send referencing the Meta-approved template by name and
+// positional {{1}}/{{2}}... parameters, never freeform text, since that's
+// what Meta requires for business-initiated messages — or an
+// honestly-labeled demo simulation when the tenant has no connected number),
+// and persists a real status per recipient — nothing here is a fabricated
+// success count. Exported so both the in-process fallback below and the
+// BullMQ worker (jobs/campaign.worker.ts) call the exact same delivery logic.
 export async function dispatchCampaign(tenantId: string, campaignId: string) {
   const campaign = await campaignsRepository.findById(tenantId, campaignId)
   if (!campaign) return
 
+  const connected = await whatsappRepository.getConnectedCredentials(tenantId)
+  const metaPhoneNumberId = connected?.metaPhoneNumberId ?? null
+  const accessToken = connected?.account.accessTokenCipher ? decryptSecret(connected.account.accessTokenCipher) : null
+
+  // A number that WAS connected but Meta has since flagged it
+  // (REAUTHORIZATION_REQUIRED/ERROR) must block the whole send, not
+  // silently fall back to demo mode — that would hide a real connection
+  // going bad behind a fake "sent" campaign.
+  if (!metaPhoneNumberId || !accessToken) {
+    const blocked = await whatsappRepository.findRequiringReauth(tenantId)
+    if (blocked) {
+      await campaignsRepository.update(tenantId, campaignId, { status: 'FAILED' })
+      await notifyTenant(tenantId, {
+        category: 'integration_error',
+        title: `Campaign "${campaign.name}" blocked — WhatsApp needs reauthorization`,
+        body: `${blocked.label ?? blocked.displayNumber} needs to be reconnected in WhatsApp settings before this campaign can send.`,
+      })
+      return
+    }
+  }
+
+  // Meta enforces template approval server-side for any real send — this
+  // just fails the whole campaign fast with a clear reason instead of
+  // burning through recipients on a template Meta will reject every time.
+  // Demo mode (no real connection yet) isn't gated on this: nothing it does
+  // is a real Meta interaction, so there's no approval state to falsify —
+  // see the WhatsApp integration audit for why this distinction matters.
+  if (metaPhoneNumberId && accessToken) {
+    try {
+      assertTemplateApproved(campaign.template)
+    } catch (err) {
+      await campaignsRepository.update(tenantId, campaignId, { status: 'FAILED' })
+      await notifyTenant(tenantId, {
+        category: 'campaign_failed',
+        title: `Campaign "${campaign.name}" failed`,
+        body: err instanceof Error ? err.message : 'Template not approved',
+      })
+      return
+    }
+  }
+
   const pending = await campaignsRepository.pendingRecipients(campaignId)
-  const contacts = await prisma.contact.findMany({ where: { id: { in: pending.map((r) => r.contactId) } }, select: { id: true, name: true, phone: true, company: true } })
+  const contacts = await prisma.contact.findMany({
+    where: { id: { in: pending.map((r) => r.contactId) } },
+    select: { id: true, name: true, phone: true, company: true, whatsappOptIn: true },
+  })
   const contactById = new Map(contacts.map((c) => [c.id, c]))
+  const header = headerMediaParameter(campaign)
 
   for (const recipient of pending) {
     const contact = contactById.get(recipient.contactId)
@@ -54,10 +116,30 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: 'Contact has no phone number on file' })
       continue
     }
-    const text = resolveMessageVariables(campaign.template.body, contact)
-    const result = await sendWhatsAppMessage({ to: contact.phone, text })
+    // Re-checked here, not just at campaign creation — a contact can opt out
+    // in the time between creating a campaign and it actually sending
+    // (immediately for "send now", up to weeks later for a scheduled one).
+    try {
+      assertContactOptedIn(contact.whatsappOptIn)
+    } catch {
+      await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: 'Contact opted out before this campaign sent' })
+      continue
+    }
+
+    const values = resolveVariableValues(campaign.template.variables as string[], contact)
+    const components = [...(header ? [header] : []), ...(values.length ? [{ type: 'body' as const, parameters: values.map((text) => ({ type: 'text', text })) }] : [])]
+
+    const result = await sendWhatsAppMessage({
+      kind: 'template',
+      to: contact.phone,
+      templateName: campaign.template.name,
+      language: campaign.template.language,
+      components,
+      metaPhoneNumberId,
+      accessToken,
+    })
     if (result.status === 'SENT') {
-      await campaignsRepository.updateRecipient(recipient.id, { status: 'SENT', waMessageId: result.waMessageId || null, sentAt: new Date() })
+      await campaignsRepository.updateRecipient(recipient.id, { status: 'SENT', waMessageId: result.waMessageId || null, sentAt: new Date(), demo: result.demo })
       if (result.demo) scheduleDemoRecipientProgression(recipient.id)
     } else {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: result.errorMessage })
@@ -80,6 +162,12 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
 const scheduledTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
 function scheduleFutureSendFallback(tenantId: string, campaignId: string, atMs: number) {
+  // Visible on purpose: this degraded path silently working is exactly what
+  // makes a real Redis outage invisible in production — a scheduled
+  // campaign quietly stops surviving restarts and stops coordinating across
+  // a horizontally-scaled deployment, with no signal to anyone unless this
+  // is logged.
+  console.warn(`[campaigns] BullMQ/Redis unavailable — campaign ${campaignId} scheduled via in-process fallback timer (won't survive a restart)`)
   const delay = Math.max(0, atMs - Date.now())
   const timer = setTimeout(() => {
     scheduledTimers.delete(campaignId)
@@ -118,6 +206,31 @@ export const campaignsService = {
     return Promise.all((await campaignsRepository.list(tenantId)).map(serialize))
   },
 
+  // Uploads the ONE media file a campaign's template header needs (Meta
+  // template headers reference a media *handle*, not a file per recipient —
+  // every recipient's send reuses this same upload). Requires a real
+  // connected number: there's no meaningful "demo" media upload to fake.
+  async uploadHeaderMedia(tenantId: string, file: { buffer: Buffer; mimeType: string; filename: string }) {
+    const { kind } = assertMediaAllowed(file.mimeType, file.buffer.length)
+    if (kind === 'document') throw ApiError.badRequest('Document headers are not supported yet — use image or video')
+
+    const connected = await whatsappRepository.getConnectedCredentials(tenantId)
+    if (!connected?.metaPhoneNumberId || !connected.account.accessTokenCipher) {
+      throw ApiError.badRequest('Connect a real WhatsApp number before uploading campaign header media')
+    }
+    if (!isStorageConfigured()) {
+      throw ApiError.badRequest('Media storage is not configured yet — set STORAGE_ENDPOINT/STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY.')
+    }
+    const accessToken = decryptSecret(connected.account.accessTokenCipher)
+
+    const key = mediaObjectKey(tenantId, `campaign-header-${randomUUID()}`, file.filename)
+    await uploadObject(key, file.buffer, file.mimeType)
+    const uploaded = await metaGraph.uploadMedia(connected.metaPhoneNumberId, accessToken, file.buffer, file.mimeType, file.filename)
+    const previewUrl = await getSignedReadUrl(key)
+
+    return { headerMediaUrl: key, headerMediaMetaId: uploaded.id, headerMediaMimeType: file.mimeType, previewUrl }
+  },
+
   async getById(tenantId: string, id: string) {
     const campaign = await campaignsRepository.findById(tenantId, id)
     if (!campaign) throw ApiError.notFound('Campaign not found')
@@ -152,11 +265,13 @@ export const campaignsService = {
     // AI-composed (or hand-written) campaign message becomes a real Template
     // row now that the send is known to be allowed — reuses the exact same
     // send/approval/audit path every other campaign already goes through,
-    // instead of a parallel "ad hoc message" concept. Auto-approved: there's
-    // no external Meta template review in demo mode, and dispatchCampaign
-    // never gates on status. Templates are unique per (tenantId, name,
-    // language) — a campaign name alone isn't (two "Summer Sale" campaigns is
-    // normal), so this gets a disambiguating suffix rather than colliding.
+    // instead of a parallel "ad hoc message" concept. Starts DRAFT, same as
+    // any other new template — it is NOT auto-approved. A real Meta
+    // connection requires actually submitting it (templates.service.ts) and
+    // waiting for Meta's review; dispatchCampaign enforces APPROVED once a
+    // real number is connected (see above). Templates are unique per
+    // (tenantId, name, language) — a campaign name alone isn't (two "Summer
+    // Sale" campaigns is normal), so this gets a disambiguating suffix.
     const template =
       existingTemplate ??
       (await prisma.template.create({
@@ -165,7 +280,7 @@ export const campaignsService = {
           name: `${input.name} (${randomUUID().slice(0, 8)})`,
           category: 'marketing',
           language: input.language || 'en_US',
-          status: 'APPROVED',
+          status: 'DRAFT',
           body: input.message!,
           variables: extractVariables(input.message!),
         },
@@ -175,6 +290,9 @@ export const campaignsService = {
       name: input.name,
       templateId: template.id,
       audienceFilter: input.audienceFilter,
+      headerMediaUrl: input.headerMediaUrl,
+      headerMediaMetaId: input.headerMediaMetaId,
+      headerMediaMimeType: input.headerMediaMimeType,
       scheduledAt: input.scheduledAt,
       status: 'DRAFT',
     })

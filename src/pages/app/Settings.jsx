@@ -1,13 +1,15 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '@/components/ui/PageHeader'
 import Tabs from '@/components/ui/Tabs'
 import Card, { CardHeader } from '@/components/ui/Card'
 import Button from '@/components/ui/Button'
+import Spinner from '@/components/ui/Spinner'
 import { Input } from '@/components/ui/Input'
 import { toast } from '@/store/toastStore'
 import { useAuthStore } from '@/store/authStore'
 import * as authService from '@/services/authService'
+import * as notificationsService from '@/services/notificationsService'
 
 const TABS = [
   { value: 'profile', label: 'Profile' },
@@ -24,7 +26,21 @@ export default function SettingsPage() {
   const [name, setName] = useState(user?.name ?? '')
   const [email, setEmail] = useState(user?.email ?? '')
   const [workspaceName, setWorkspaceName] = useState(tenant?.name ?? '')
-  const [notifications, setNotifications] = useState({ newLead: true, campaignComplete: true, weeklyReport: false, mentions: true })
+  const queryClient = useQueryClient()
+
+  const preferencesQuery = useQuery({
+    queryKey: ['notification-preferences'],
+    queryFn: notificationsService.getNotificationPreferences,
+    enabled: tab === 'notifications',
+  })
+
+  const preferencesMutation = useMutation({
+    mutationFn: notificationsService.updateNotificationPreferences,
+    onSuccess: (updated) => {
+      queryClient.setQueryData(['notification-preferences'], updated)
+    },
+    onError: (err) => toast.error(err.message || 'Could not save this preference'),
+  })
 
   const profileMutation = useMutation({
     mutationFn: () => authService.updateProfile({ name, email }),
@@ -74,26 +90,28 @@ export default function SettingsPage() {
 
         {tab === 'notifications' && (
           <Card className="flex flex-col gap-1">
-            <CardHeader title="Notification preferences" description="Changes apply immediately." />
-            {Object.entries({
-              newLead: 'New lead assigned to me',
-              campaignComplete: 'Campaign finished sending',
-              weeklyReport: 'Weekly performance summary',
-              mentions: 'Mentioned in an internal note',
-            }).map(([key, label]) => (
-              <label key={key} className="flex items-center justify-between border-b border-ink-100 py-3 text-sm text-ink-700 last:border-0">
-                {label}
-                <input
-                  type="checkbox"
-                  checked={notifications[key]}
-                  onChange={(e) => {
-                    setNotifications({ ...notifications, [key]: e.target.checked })
-                    toast.success(`${label}: ${e.target.checked ? 'on' : 'off'}`)
-                  }}
-                  className="h-4 w-4 rounded border-ink-300"
-                />
-              </label>
-            ))}
+            <CardHeader title="Notification preferences" description="Saved to your account — persists across devices and sessions." />
+            {preferencesQuery.isLoading ? (
+              <Spinner label="Loading preferences..." />
+            ) : (
+              Object.entries({
+                newLead: 'New lead assigned to me',
+                campaignComplete: 'Campaign finished sending',
+                weeklyReport: 'Weekly performance summary',
+                mentions: 'Mentioned in an internal note',
+              }).map(([key, label]) => (
+                <label key={key} className="flex items-center justify-between border-b border-ink-100 py-3 text-sm text-ink-700 last:border-0">
+                  {label}
+                  <input
+                    type="checkbox"
+                    checked={preferencesQuery.data?.[key] ?? false}
+                    disabled={preferencesMutation.isPending}
+                    onChange={(e) => preferencesMutation.mutate({ [key]: e.target.checked })}
+                    className="h-4 w-4 rounded border-ink-300"
+                  />
+                </label>
+              ))
+            )}
           </Card>
         )}
       </div>

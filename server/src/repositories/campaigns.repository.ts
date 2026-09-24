@@ -35,10 +35,14 @@ export const campaignsRepository = {
   },
 
   async stats(campaignId: string) {
-    const [recipientCounts, eventCounts, audienceSize] = await Promise.all([
+    const [recipientCounts, eventCounts, audienceSize, demoSent] = await Promise.all([
       prisma.campaignRecipient.groupBy({ by: ['status'], where: { campaignId }, _count: { _all: true } }),
       prisma.campaignEvent.groupBy({ by: ['type'], where: { campaignId }, _count: { _all: true } }),
       prisma.campaignRecipient.count({ where: { campaignId } }),
+      // Surfaced so the UI can never present a simulated send run (no real
+      // WhatsApp number connected at dispatch time) as indistinguishable
+      // from a real Meta-confirmed one.
+      prisma.campaignRecipient.count({ where: { campaignId, demo: true } }),
     ])
     const byStatus = Object.fromEntries(recipientCounts.map((r) => [r.status, r._count._all]))
     const byEvent = Object.fromEntries(eventCounts.map((e) => [e.type, e._count._all]))
@@ -51,6 +55,7 @@ export const campaignsRepository = {
       replied: byEvent.replied ?? 0,
       clicked: byEvent.clicked ?? 0,
       converted: byEvent.converted ?? 0,
+      demoSent,
     }
   },
 
@@ -58,7 +63,7 @@ export const campaignsRepository = {
   // gets resolved. Eligibility (opted in, has a phone number) is enforced
   // here so it can never be bypassed by a frontend that forgot to filter.
   audienceWhere(tenantId: string, filter: AudienceFilter): Prisma.ContactWhereInput {
-    const eligible: Prisma.ContactWhereInput = { tenantId, optedIn: true, phone: { not: '' } }
+    const eligible: Prisma.ContactWhereInput = { tenantId, whatsappOptIn: 'OPTED_IN', phone: { not: '' } }
     if (filter.mode === 'contacts') {
       return { ...eligible, id: { in: filter.contactIds ?? [] } }
     }

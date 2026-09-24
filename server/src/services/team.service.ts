@@ -3,6 +3,7 @@ import { teamRepository } from '@/repositories/team.repository.js'
 import { assertUnderLimit } from '@/services/planLimits.service.js'
 import { notifyUser } from '@/services/notifications.service.js'
 import { sendEmail } from '@/integrations/email.adapter.js'
+import { env } from '@/config/env.js'
 import { ApiError } from '@/utils/apiError.js'
 import { serializeTeamMember } from '@/utils/serializers.js'
 import type { z } from 'zod'
@@ -33,11 +34,18 @@ export const teamService = {
     const placeholderHash = crypto.randomBytes(32).toString('hex')
     const membership = await teamRepository.createInvite(tenantId, { ...input, passwordHash: placeholderHash, inviteToken })
 
-    await sendEmail({
+    const emailResult = await sendEmail({
       to: input.email,
       subject: "You've been invited to a Loopwave workspace",
-      body: `Hi ${input.name}, you've been invited to join a Loopwave workspace as ${input.role.toLowerCase().replace('_', ' ')}. Set your password to get started: ${process.env.WEB_APP_URL ?? 'http://localhost:5173'}/accept-invite?token=${inviteToken}`,
+      body: `Hi ${input.name}, you've been invited to join a Loopwave workspace as ${input.role.toLowerCase().replace('_', ' ')}. Set your password to get started: ${env.WEB_APP_URL}/accept-invite?token=${inviteToken}`,
     })
+    // The membership itself is real and already created either way — but a
+    // genuine (non-demo) send failure here means the invitee never actually
+    // got the email, which is worth a visible signal rather than a silent
+    // swallow (they can still be invited again, or an admin can resend).
+    if (!emailResult.sent && !emailResult.demo) {
+      console.warn(`[team] invite email to ${input.email} failed to send (tenant ${tenantId})`)
+    }
 
     return serializeTeamMember(membership.user, membership)
   },

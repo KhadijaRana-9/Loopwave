@@ -12,13 +12,12 @@ describe('Campaigns — AI compose, audience resolution, usage enforcement, tena
     tenantB = await signupTenant('campaigns-b')
     supportAgent = await inviteAndLogin(tenantA, 'support_agent')
 
-    await tenantA.agent.post('/api/contacts').send({ name: 'Aisha Buyer', phone: '+15551110001' })
-    await tenantA.agent.post('/api/contacts').send({ name: 'Ravi Buyer', phone: '+15551110002' })
-    const optOutRes = await tenantA.agent.post('/api/contacts').send({ name: 'Zoe Optout', phone: '+15551110003' })
-    // createContactSchema has no public optedIn field (no opt-out path exists
-    // yet in contact create/import) — set it directly to exercise the
-    // eligibility filter itself, independent of that separate gap.
-    await prisma.contact.update({ where: { id: optOutRes.body.contact.id }, data: { optedIn: false } })
+    // New contacts default to UNKNOWN (never assumed opted in) — campaigns
+    // require an explicit OPTED_IN, so these two are set directly to
+    // exercise the eligibility filter itself.
+    await tenantA.agent.post('/api/contacts').send({ name: 'Aisha Buyer', phone: '+15551110001', whatsappOptIn: 'OPTED_IN' })
+    await tenantA.agent.post('/api/contacts').send({ name: 'Ravi Buyer', phone: '+15551110002', whatsappOptIn: 'OPTED_IN' })
+    await tenantA.agent.post('/api/contacts').send({ name: 'Zoe Optout', phone: '+15551110003', whatsappOptIn: 'OPTED_OUT' })
   })
 
   afterAll(async () => {
@@ -75,6 +74,15 @@ describe('Campaigns — AI compose, audience resolution, usage enforcement, tena
     // assuming a prior state, then push it to exactly 1-short of the limit —
     // proves the block is a real recalculation against real usage rows, not
     // a frontend-supplied number.
+    // dispatchCampaign records usage BEFORE it stamps COMPLETED, so once every
+    // earlier campaign has settled its usage is final. Without this wait the
+    // read below races the earlier fire-and-forget send on a slow remote DB.
+    for (let i = 0; i < 90; i++) {
+      const list = await tenantA.agent.get('/api/campaigns')
+      if ((list.body.campaigns as { status: string }[]).every((c) => ['completed', 'failed', 'draft', 'cancelled'].includes(c.status))) break
+      await new Promise((r) => setTimeout(r, 1000))
+    }
+
     const before = await tenantA.agent.post('/api/campaigns/audience/preview').send({ audienceFilter: { mode: 'all' } })
     const { limit, used } = before.body.plan as { limit: number; used: number }
     const topUp = limit - used - 1

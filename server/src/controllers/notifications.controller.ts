@@ -9,6 +9,11 @@ function requireAuthCtx(req: Request) {
   return { tenantId: req.auth.tenantId, userId: req.auth.sub }
 }
 
+// Real, persisted per-user-per-workspace preferences (Membership.notificationPreferences)
+// — a fresh membership has no stored keys yet, so these are the fallback
+// values a brand-new member sees before ever touching a toggle.
+const DEFAULT_NOTIFICATION_PREFERENCES = { newLead: true, campaignComplete: true, weeklyReport: false, mentions: true }
+
 export const notificationsController = {
   list: asyncHandler(async (req: Request, res: Response) => {
     const { tenantId, userId } = requireAuthCtx(req)
@@ -31,5 +36,21 @@ export const notificationsController = {
     const { tenantId, userId } = requireAuthCtx(req)
     await prisma.notification.updateMany({ where: { tenantId, OR: [{ userId }, { userId: null }], readAt: null }, data: { readAt: new Date() } })
     res.status(204).send()
+  }),
+
+  getPreferences: asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = requireAuthCtx(req)
+    const membership = await prisma.membership.findUnique({ where: { tenantId_userId: { tenantId, userId } }, select: { notificationPreferences: true } })
+    res.json({ preferences: { ...DEFAULT_NOTIFICATION_PREFERENCES, ...((membership?.notificationPreferences as Record<string, boolean>) ?? {}) } })
+  }),
+
+  updatePreferences: asyncHandler(async (req: Request, res: Response) => {
+    const { tenantId, userId } = requireAuthCtx(req)
+    const membership = await prisma.membership.findUnique({ where: { tenantId_userId: { tenantId, userId } } })
+    if (!membership) throw ApiError.forbidden('No active membership for this workspace')
+    const current = { ...DEFAULT_NOTIFICATION_PREFERENCES, ...((membership.notificationPreferences as Record<string, boolean>) ?? {}) }
+    const updated = { ...current, ...req.body }
+    await prisma.membership.update({ where: { id: membership.id }, data: { notificationPreferences: updated } })
+    res.json({ preferences: updated })
   }),
 }

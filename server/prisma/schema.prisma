@@ -129,6 +129,12 @@ model Membership {
   inviteToken          String?   @unique
   inviteTokenExpiresAt DateTime?
 
+  // { newLead, campaignComplete, weeklyReport, mentions: boolean } — missing
+  // keys fall back to the same defaults notifications.service.ts returns for
+  // a brand-new membership. Real, persisted per-user-per-workspace prefs —
+  // not a client-only toggle that resets on refresh.
+  notificationPreferences Json @default("{}")
+
   @@unique([tenantId, userId])
   @@index([tenantId])
   @@index([userId])
@@ -237,24 +243,37 @@ enum LeadStatus {
   LOST
 }
 
+// WhatsApp Business Messaging Policy requires real, tracked consent — a
+// contact must never be assumed opted in. UNKNOWN is the honest default;
+// OPTED_IN is only set by an explicit action (contact messages in first, or
+// a manual override) — see whatsappWebhook.service.ts and
+// whatsappCompliance.service.ts.
+enum OptInStatus {
+  OPTED_IN
+  OPTED_OUT
+  UNKNOWN
+}
+
 model Contact {
-  id                String     @id @default(cuid())
+  id                String      @id @default(cuid())
   tenantId          String
-  tenant            Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant            Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   name              String
   phone             String
   email             String?
   company           String?
   source            String?
-  leadStatus        LeadStatus @default(NEW)
-  leadScore         Int        @default(0)
-  optedIn           Boolean    @default(true)
+  leadStatus        LeadStatus  @default(NEW)
+  leadScore         Int         @default(0)
+  whatsappOptIn     OptInStatus @default(UNKNOWN)
+  optInSource       String? // 'whatsapp_reply' | 'manual' | 'import'
+  optOutAt          DateTime?
   assignedAgentId   String?
-  assignedAgent     User?      @relation("ContactAssignee", fields: [assignedAgentId], references: [id], onDelete: SetNull)
-  customFields      Json       @default("{}")
+  assignedAgent     User?       @relation("ContactAssignee", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+  customFields      Json        @default("{}")
   lastInteractionAt DateTime?
-  createdAt         DateTime   @default(now())
-  updatedAt         DateTime   @updatedAt
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt
 
   tags          ContactTag[]
   conversations Conversation[]
@@ -428,13 +447,18 @@ model Message {
   conversationId String
   conversation   Conversation      @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   direction      MessageDirection
-  type           String            @default("text") // text | image | document | template | ...
-  text           String?
-  mediaUrl       String?
+  type           String            @default("text") // text | image | video | document | template | ...
+  text           String? // for media messages, doubles as the caption
+  mediaUrl       String? // our own storage proxy path, never Meta's short-lived CDN url
+  mediaMimeType  String?
+  mediaSizeBytes Int?
+  mediaFileName  String?
+  metaMediaId    String? // Meta media handle — set on outbound before send, or briefly on inbound while we mirror it to our storage
   templateId     String?
   status         MessageStatus     @default(QUEUED)
   waMessageId    String? // Meta Cloud API message id, once sent
   errorMessage   String?
+  demo           Boolean           @default(false) // true only for a simulated send (no real WhatsApp number connected) — real Meta-confirmed messages are always false, so analytics/UI can tell them apart
   createdAt      DateTime          @default(now())
 
   @@index([conversationId, createdAt])
@@ -450,21 +474,40 @@ enum TemplateStatus {
   PENDING
   APPROVED
   REJECTED
+  PAUSED
+}
+
+// NONE/TEXT need no media at send time. IMAGE/VIDEO/DOCUMENT templates
+// require a media file to be supplied per-campaign (see Campaign.headerMediaUrl) —
+// Meta stores the header *shape* on the template, not the file itself.
+enum TemplateHeaderType {
+  NONE
+  TEXT
+  IMAGE
+  VIDEO
+  DOCUMENT
 }
 
 model Template {
-  id         String          @id @default(cuid())
-  tenantId   String
-  tenant     Tenant          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  name       String
-  category   String // utility | marketing | authentication
-  language   String          @default("en_US")
-  status     TemplateStatus  @default(DRAFT)
-  body       String
-  variables  Json            @default("[]")
+  id             String             @id @default(cuid())
+  tenantId       String
+  tenant         Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  name           String
+  category       String // utility | marketing | authentication
+  language       String             @default("en_US")
+  status         TemplateStatus     @default(DRAFT)
+  headerType     TemplateHeaderType @default(NONE)
+  header         String? // header text when headerType is TEXT; unused otherwise
+  body           String
+  footer         String?
+  buttons        Json               @default("[]")
+  variables      Json               @default("[]")
   metaTemplateId String?
-  createdAt  DateTime        @default(now())
-  updatedAt  DateTime        @updatedAt
+  rejectedReason String?
+  submittedAt    DateTime? // set only on a real submission to Meta (submitForReview with a connected account) — never on the honest local-only PENDING stub
+  metaSyncedAt   DateTime? // last time this row's status was reconciled against Meta's own record (submit, sync-from-Meta, or the status-update webhook)
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
 
   versions  TemplateVersion[]
   campaigns Campaign[]
@@ -501,6 +544,11 @@ model Campaign {
   template      Template       @relation(fields: [templateId], references: [id])
   status        CampaignStatus @default(DRAFT)
   audienceFilter Json          @default("{}")
+  // One media file shared by every recipient's send — required exactly when
+  // template.headerType is IMAGE/VIDEO/DOCUMENT (see campaigns.service.ts).
+  headerMediaUrl      String?
+  headerMediaMetaId   String? // Meta media handle, uploaded once at compose time
+  headerMediaMimeType String?
   scheduledAt   DateTime?
   startedAt     DateTime?
   completedAt   DateTime?
@@ -529,6 +577,7 @@ model CampaignRecipient {
   status     RecipientStatus @default(PENDING)
   waMessageId String?
   errorMessage String?
+  demo       Boolean         @default(false) // true only for a simulated delivery (no real WhatsApp number connected)
   sentAt     DateTime?
   deliveredAt DateTime?
   readAt     DateTime?
@@ -759,40 +808,49 @@ model FormSubmission {
 enum WhatsAppNumberStatus {
   PENDING_VERIFICATION
   CONNECTED
+  REAUTHORIZATION_REQUIRED // Meta invalidated our token (revoked, password change, etc.) — needs the tenant to reconnect
   DISCONNECTED
   ERROR
 }
 
+// App-level secrets (App Secret, webhook verify token) are one value shared
+// by every tenant's WABA on this Meta App — they live in env vars
+// (WHATSAPP_APP_SECRET / WHATSAPP_VERIFY_TOKEN), not here. This model only
+// ever holds what's genuinely per-tenant: which WABA a tenant connected and
+// the long-lived token Meta issued for it.
 model WhatsAppAccount {
-  id                String   @id @default(cuid())
+  id                String    @id @default(cuid())
   tenantId          String
-  tenant            Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant            Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   wabaId            String? // Meta WhatsApp Business Account id
-  accessTokenCipher String? // encrypted at rest, never returned to the frontend
-  verifyToken       String? // used for webhook subscription challenge
-  appSecretCipher   String?
-  isDemoMode        Boolean  @default(true) // true until real Meta credentials are configured
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  businessId        String? // Meta Business Manager id the WABA belongs to
+  businessName      String?
+  accessTokenCipher String? // encrypted at rest (AES-256-GCM, see utils/crypto.ts), never returned to the frontend
+  tokenExpiresAt    DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   phoneNumbers WhatsAppPhoneNumber[]
 
   @@index([tenantId])
+  @@index([wabaId])
 }
 
 model WhatsAppPhoneNumber {
-  id             String                @id @default(cuid())
-  accountId      String
-  account        WhatsAppAccount       @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  displayNumber  String
-  label          String?
+  id                String               @id @default(cuid())
+  accountId         String
+  account           WhatsAppAccount      @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  displayNumber     String
+  label             String? // tenant's own internal name for this line
+  verifiedName      String? // Meta's verified business display name for the number
   metaPhoneNumberId String?
-  status         WhatsAppNumberStatus  @default(PENDING_VERIFICATION)
-  qualityRating  String?
-  messagingTier  String?
-  connectedAt    DateTime?
+  status            WhatsAppNumberStatus @default(PENDING_VERIFICATION)
+  qualityRating     String?
+  messagingTier     String?
+  connectedAt       DateTime?
 
   @@index([accountId])
+  @@index([metaPhoneNumberId])
 }
 
 model WebhookEvent {
@@ -864,4 +922,19 @@ model AuditLog {
 
   @@index([tenantId, createdAt])
   @@index([action])
+}
+
+// ---------------------------------------------------------------------------
+// Platform-wide (super-admin) settings
+// ---------------------------------------------------------------------------
+
+// Single-row table — there is exactly one platform. trialDays is actually
+// consumed at signup (see auth.repository.ts#createTenantWithOwner); this
+// isn't a cosmetic-only setting the super-admin panel just displays.
+model PlatformSettings {
+  id            String   @id @default(cuid())
+  platformName  String   @default("Loopwave")
+  supportEmail  String   @default("")
+  trialDays     Int      @default(14)
+  updatedAt     DateTime @updatedAt
 }

@@ -20,6 +20,17 @@ export async function sendMessage(conversationId, text) {
   return message
 }
 
+// Real image/video/document reply — requires a real connected WhatsApp
+// number and configured media storage server-side; there is no demo-mode
+// simulation for media (see server/src/services/conversations.service.ts#sendMedia).
+export async function sendMedia(conversationId, file, caption) {
+  const form = new FormData()
+  form.append('file', file)
+  if (caption) form.append('caption', caption)
+  const { message } = await apiClient.postForm(`/conversations/${conversationId}/messages/media`, form)
+  return message
+}
+
 export async function assignConversation(conversationId, agentId) {
   const { conversation } = await apiClient.patch(`/conversations/${conversationId}/assign`, { agentId })
   return conversation

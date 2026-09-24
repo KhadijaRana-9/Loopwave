@@ -32,6 +32,27 @@ export const conversationsController = {
     res.status(201).json({ message })
   }),
 
+  sendMedia: asyncHandler(async (req: Request, res: Response) => {
+    const tId = tenantId(req)
+    const file = (req as Request & { file?: Express.Multer.File }).file
+    if (!file) throw ApiError.badRequest('No file uploaded')
+    const message = await conversationsService.sendMedia(
+      tId,
+      req.params.id as string,
+      { buffer: file.buffer, mimeType: file.mimetype, filename: file.originalname },
+      typeof req.body.caption === 'string' && req.body.caption.trim() ? req.body.caption.trim() : undefined,
+    )
+    getIo()?.to(`tenant:${tId}`).emit('conversation:message', { conversationId: req.params.id, message })
+    res.status(201).json({ message })
+  }),
+
+  // Redirects to a short-lived signed storage URL — never returns a
+  // permanent one, and the tenant scope check happens inside the service.
+  getMedia: asyncHandler(async (req: Request, res: Response) => {
+    const url = await conversationsService.getMediaSignedUrl(tenantId(req), req.params.messageId as string)
+    res.redirect(url)
+  }),
+
   assign: asyncHandler(async (req: Request, res: Response) => {
     const conversation = await conversationsService.assign(tenantId(req), req.params.id as string, req.body.agentId)
     res.json({ conversation })

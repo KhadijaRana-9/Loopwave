@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
-import { Sparkles, RefreshCw, Wand2, Smile, SmilePlus, AlertTriangle, Search, Check, Loader2 } from 'lucide-react'
+import { Sparkles, RefreshCw, Wand2, Smile, SmilePlus, AlertTriangle, Search, Check, Loader2, ImagePlus, X } from 'lucide-react'
 import Modal from '@/components/ui/Modal'
 import Button from '@/components/ui/Button'
 import { Input, Textarea, Select } from '@/components/ui/Input'
@@ -50,7 +50,9 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
   const [brief, setBrief] = useState(emptyBrief)
   const [message, setMessage] = useState('')
   const [hasGenerated, setHasGenerated] = useState(false)
+  const [messageIsSimulated, setMessageIsSimulated] = useState(false) // true when the last AI draft came from the no-provider fallback, not a real LLM
   const [templateId, setTemplateId] = useState('')
+  const [headerMedia, setHeaderMedia] = useState(null) // { headerMediaUrl, headerMediaMetaId, headerMediaMimeType, previewUrl } once really uploaded to Meta
 
   // --- Audience ---
   const [audienceMode, setAudienceMode] = useState('all') // 'all' | 'filter' | 'contacts'
@@ -122,8 +124,16 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
       }),
     onSuccess: (result) => {
       setMessage(result.message)
+      setMessageIsSimulated(result.demo === true)
       setHasGenerated(true)
     },
+  })
+
+  // Real upload to Meta — requires a real connected WhatsApp number, same
+  // as any other media send (server/src/services/campaigns.service.ts#uploadHeaderMedia).
+  const uploadHeaderMediaMutation = useMutation({
+    mutationFn: (file) => campaignsService.uploadHeaderMedia(file),
+    onSuccess: (result) => setHeaderMedia(result),
   })
 
   function toggleContact(id) {
@@ -153,7 +163,9 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
     setBrief(emptyBrief())
     setMessage('')
     setHasGenerated(false)
+    setMessageIsSimulated(false)
     setTemplateId('')
+    setHeaderMedia(null)
     setAudienceMode('all')
     setFilters(emptyFilters())
     setSearch('')
@@ -167,7 +179,8 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
     onClose()
   }
 
-  const messageReady = composeMode === 'ai' ? message.trim().length > 0 : Boolean(selectedTemplate)
+  const templateNeedsHeaderMedia = composeMode === 'template' && (selectedTemplate?.headerType === 'image' || selectedTemplate?.headerType === 'video')
+  const messageReady = composeMode === 'ai' ? message.trim().length > 0 : Boolean(selectedTemplate) && (!templateNeedsHeaderMedia || Boolean(headerMedia))
   const canContinueFromCompose = messageReady && name.trim().length > 0
   const canContinueFromAudience = resolvedCount !== null && resolvedCount > 0
   const canSend = !overLimit && canContinueFromAudience
@@ -183,6 +196,11 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
       payload.language = brief.language || 'en_US'
     } else {
       payload.templateId = templateId
+      if (headerMedia) {
+        payload.headerMediaUrl = headerMedia.headerMediaUrl
+        payload.headerMediaMetaId = headerMedia.headerMediaMetaId
+        payload.headerMediaMimeType = headerMedia.headerMediaMimeType
+      }
     }
     onSubmit(payload)
   }
@@ -294,6 +312,11 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
 
                 {(hasGenerated || message) && (
                   <>
+                    {hasGenerated && messageIsSimulated && (
+                      <p className="flex items-center gap-1.5 text-xs text-warning-700">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> No AI provider is configured, so this draft was assembled from your brief by a simple template — not written by an AI model.
+                      </p>
+                    )}
                     <Textarea
                       id="generated-message"
                       label="Generated message — edit freely"
@@ -329,7 +352,10 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
                 {approvedTemplates.map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => setTemplateId(t.id)}
+                    onClick={() => {
+                      setTemplateId(t.id)
+                      setHeaderMedia(null)
+                    }}
                     className={`flex w-full flex-col rounded-lg border p-3 text-left ${templateId === t.id ? 'border-brand-500 bg-brand-50' : 'border-ink-200 hover:bg-ink-50'}`}
                   >
                     <div className="flex items-center justify-between">
@@ -339,6 +365,41 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
                     <p className="mt-1 text-xs text-ink-500">{t.body}</p>
                   </button>
                 ))}
+
+                {templateNeedsHeaderMedia && (
+                  <div className="rounded-lg border border-ink-200 p-3">
+                    <div className="mb-2 text-xs font-medium text-ink-600">
+                      This template needs a {selectedTemplate.headerType} header — upload the one file every recipient's message will reuse.
+                    </div>
+                    {headerMedia ? (
+                      <div className="flex items-center gap-3">
+                        {selectedTemplate.headerType === 'image' ? (
+                          <img src={headerMedia.previewUrl} alt="Header preview" className="h-14 w-14 rounded-lg object-cover" />
+                        ) : (
+                          <video src={headerMedia.previewUrl} className="h-14 w-14 rounded-lg object-cover" />
+                        )}
+                        <span className="flex-1 text-xs text-ink-500">Uploaded to Meta — ready to send.</span>
+                        <button onClick={() => setHeaderMedia(null)} className="rounded-lg p-1.5 text-ink-400 hover:bg-ink-100" aria-label="Remove header media">
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-dashed border-ink-300 px-3 py-2 text-xs font-medium text-ink-600 hover:bg-ink-50">
+                        {uploadHeaderMediaMutation.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+                        {uploadHeaderMediaMutation.isPending ? 'Uploading…' : `Upload ${selectedTemplate.headerType}`}
+                        <input
+                          type="file"
+                          accept={selectedTemplate.headerType === 'image' ? 'image/jpeg,image/png' : 'video/mp4,video/3gpp'}
+                          className="hidden"
+                          onChange={(e) => e.target.files?.[0] && uploadHeaderMediaMutation.mutate(e.target.files[0])}
+                        />
+                      </label>
+                    )}
+                    {uploadHeaderMediaMutation.isError && (
+                      <p className="mt-1.5 text-xs text-danger-500">{uploadHeaderMediaMutation.error?.message || 'Could not upload this file.'}</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -405,9 +466,14 @@ export default function CampaignWizard({ open, onClose, onSubmit, submitting, su
                         <span className="font-medium text-ink-900">{c.name}</span>
                         <span className="ml-2 text-ink-400">{c.phone}</span>
                       </span>
-                      {!c.optedIn && (
+                      {c.whatsappOptIn === 'opted_out' && (
                         <Badge tone="danger" title="Opted out — won't receive campaign messages">
                           opted out
+                        </Badge>
+                      )}
+                      {c.whatsappOptIn === 'unknown' && (
+                        <Badge tone="warning" title="No recorded WhatsApp opt-in yet — marketing campaigns only reach contacts who opted in">
+                          no opt-in yet
                         </Badge>
                       )}
                     </label>

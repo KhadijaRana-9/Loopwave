@@ -35,6 +35,12 @@ export const createCampaignSchema = z
       .default('en_US')
       .refine((v) => WHATSAPP_LANGUAGE_CODES.has(v as never), { message: 'Unsupported WhatsApp template language code' }),
     audienceFilter: audienceFilterSchema.default({}),
+    // Set by a prior POST /campaigns/header-media upload when the chosen
+    // template's header requires an image/video/document — see
+    // campaigns.service.ts#uploadHeaderMedia.
+    headerMediaUrl: z.string().trim().optional(),
+    headerMediaMetaId: z.string().trim().optional(),
+    headerMediaMimeType: z.string().trim().optional(),
     scheduledAt: z.coerce.date().nullable().optional(),
   })
   .refine((v) => v.templateId || v.message, { message: 'Either templateId or message is required', path: ['message'] })

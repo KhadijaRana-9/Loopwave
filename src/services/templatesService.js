@@ -20,6 +20,12 @@ export async function submitTemplateForReview(id) {
   return template
 }
 
+// Pulls real status from Meta for every submitted template and reconciles
+// it locally — { synced, total }.
+export async function syncTemplates() {
+  return apiClient.post('/templates/sync')
+}
+
 export async function deleteTemplate(id) {
   await apiClient.delete(`/templates/${id}`)
   return { deleted: id }

@@ -36,7 +36,16 @@ export default function CampaignDetail() {
       <PageHeader
         title={campaign.name}
         description={`Template: ${campaign.template?.name ?? '—'}`}
-        action={<Badge tone="brand">{campaign.status}</Badge>}
+        action={
+          <div className="flex items-center gap-2">
+            {campaign.demoSent > 0 && (
+              <Badge tone="warning" title="No WhatsApp number was connected when this campaign sent — these deliveries are simulated, not Meta-confirmed.">
+                {campaign.demoSent === campaign.sent ? 'Simulated (no number connected)' : `${campaign.demoSent} simulated`}
+              </Badge>
+            )}
+            <Badge tone="brand">{campaign.status}</Badge>
+          </div>
+        }
       />
 
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-6">

@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Eye, Pencil, Plus, Send, Trash2 } from 'lucide-react'
+import { Eye, Pencil, Plus, RefreshCw, Send, Trash2 } from 'lucide-react'
 import PageHeader from '@/components/ui/PageHeader'
 import Button from '@/components/ui/Button'
 import Badge from '@/components/ui/Badge'
@@ -54,6 +54,15 @@ export default function Templates() {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
       toast.success('Template deleted')
     },
+  })
+
+  const syncMutation = useMutation({
+    mutationFn: templatesService.syncTemplates,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['templates'] })
+      toast.success(`Synced ${result.synced} of ${result.total} template${result.total === 1 ? '' : 's'} from Meta`)
+    },
+    onError: (err) => toast.error(err.message || 'Could not sync with Meta'),
   })
 
   const templates = templatesQuery.data ?? []
@@ -118,9 +127,14 @@ export default function Templates() {
         title="Message templates"
         description="UI-managed templates — actual Meta approval happens once submitted through a connected WABA."
         action={
-          <Button onClick={openCreate}>
-            <Plus className="h-4 w-4" /> New template
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" loading={syncMutation.isPending} onClick={() => syncMutation.mutate()}>
+              <RefreshCw className="h-4 w-4" /> Sync from Meta
+            </Button>
+            <Button onClick={openCreate}>
+              <Plus className="h-4 w-4" /> New template
+            </Button>
+          </div>
         }
       />
 

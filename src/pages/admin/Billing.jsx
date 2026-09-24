@@ -24,7 +24,7 @@ export default function AdminBilling() {
 
   return (
     <div>
-      <PageHeader title="Platform billing" description="Revenue overview — connect Stripe/Razorpay for real transaction data." />
+      <PageHeader title="Platform billing" description="Revenue overview — connect Stripe for real transaction data." />
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <StatCard label="MRR" value={`₹${stats.mrr.toLocaleString()}`} />
         <StatCard label="Paying businesses" value={stats.paidBusinesses} />

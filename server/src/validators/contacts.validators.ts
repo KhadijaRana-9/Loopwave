@@ -24,6 +24,10 @@ export const createContactSchema = z.object({
   leadStatus: z
     .enum(['NEW', 'QUALIFIED', 'CONTACTED', 'INTERESTED', 'DEMO_BOOKED', 'CONVERTED', 'LOST'])
     .default('NEW'),
+  // Manual override for the tri-state WhatsApp consent — e.g. importing
+  // contacts with already-recorded consent. New contacts default to UNKNOWN
+  // (Prisma schema default) when this is omitted, never assumed opted in.
+  whatsappOptIn: z.enum(['OPTED_IN', 'OPTED_OUT', 'UNKNOWN']).optional(),
   assignedAgentId: z.string().trim().optional(),
   tags: z.array(z.string().trim().min(1)).default([]),
   customFields: z.record(z.string(), z.unknown()).default({}),
