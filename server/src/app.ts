@@ -9,6 +9,7 @@ import { env } from '@/config/env.js'
 import routes from '@/routes/index.js'
 import { errorHandler, notFoundHandler } from '@/middleware/errorHandler.js'
 import { apiRateLimit } from '@/middleware/rateLimit.js'
+import { redactUrlForLog } from '@/utils/logRedaction.js'
 
 export function createApp() {
   const app = express()
@@ -31,7 +32,7 @@ export function createApp() {
       // and under sustained load measurably slows request handling — logging
       // is meant to observe the system, not become its bottleneck.
       serializers: {
-        req: (req) => ({ id: req.id, method: req.method, url: req.url }),
+        req: (req) => ({ id: req.id, method: req.method, url: redactUrlForLog(req.url) }),
         res: (res) => ({ statusCode: res.statusCode }),
       },
     }),
