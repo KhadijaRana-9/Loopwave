@@ -110,7 +110,18 @@ export interface MetaTemplateComponent {
   type: 'HEADER' | 'BODY' | 'FOOTER' | 'BUTTONS'
   format?: 'TEXT' | 'IMAGE' | 'VIDEO' | 'DOCUMENT'
   text?: string
+  // Meta rejects a template whose body/header uses {{n}} variables without
+  // sample values (`body_text` is a list of parameter rows, one sample per {{n}}).
+  example?: { body_text?: string[][]; header_text?: string[] }
   buttons?: { type: string; text: string; url?: string; phone_number?: string }[]
+}
+
+export interface MetaTemplateSummary {
+  id: string
+  name: string
+  status: string
+  language?: string
+  rejected_reason?: string
 }
 
 export async function createMetaTemplate(
@@ -126,8 +137,24 @@ export async function createMetaTemplate(
   })
 }
 
-export async function listMetaTemplates(wabaId: string, accessToken: string): Promise<{ data: { id: string; name: string; status: string }[] }> {
-  return graphFetch(`/${wabaId}/message_templates?fields=id,name,status`, { accessToken })
+// Follows Graph pagination — a single call returns only the first page
+// (25 by default), so a WABA with more templates than that would otherwise
+// never be fully reconciled by a sync.
+export async function listMetaTemplates(wabaId: string, accessToken: string): Promise<{ data: MetaTemplateSummary[] }> {
+  const all: MetaTemplateSummary[] = []
+  let after: string | undefined
+  for (let page = 0; page < 20; page++) {
+    const query = new URLSearchParams({ fields: 'id,name,status,language,rejected_reason', limit: '100' })
+    if (after) query.set('after', after)
+    const res = await graphFetch<{ data: MetaTemplateSummary[]; paging?: { cursors?: { after?: string }; next?: string } }>(
+      `/${wabaId}/message_templates?${query}`,
+      { accessToken },
+    )
+    all.push(...res.data)
+    if (!res.paging?.next || !res.paging.cursors?.after) break
+    after = res.paging.cursors.after
+  }
+  return { data: all }
 }
 
 // Meta deletes by template name (removing every language variant of it at

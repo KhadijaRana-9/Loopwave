@@ -64,8 +64,20 @@ export const whatsappService = {
     let wabaDetails: Awaited<ReturnType<typeof metaGraph.getWabaDetails>>
     let numberDetails: Awaited<ReturnType<typeof metaGraph.getPhoneNumberDetails>>
     try {
-      const shortLived = await metaGraph.exchangeCodeForToken(input.code)
-      longLived = await metaGraph.exchangeForLongLivedToken(shortLived.accessToken)
+      const initial = await metaGraph.exchangeCodeForToken(input.code)
+      // Best-effort extension to a ~60-day token. The token the code exchange
+      // returns for an Embedded Signup "60 expiration token" configuration is
+      // already business-scoped, and Meta's docs don't document
+      // fb_exchange_token for that token type — so if Meta refuses the second
+      // exchange, keep the first token (with ITS real expiry) rather than
+      // failing a connection that already succeeded. Any non-Meta failure
+      // (network etc.) still aborts.
+      longLived = initial
+      try {
+        longLived = await metaGraph.exchangeForLongLivedToken(initial.accessToken)
+      } catch (extendErr) {
+        if (!(extendErr instanceof MetaGraphError)) throw extendErr
+      }
 
       // Re-verify against the Graph API using the token we just obtained —
       // if the tenant doesn't actually have access to this WABA/number, these

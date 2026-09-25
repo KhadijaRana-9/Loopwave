@@ -45,19 +45,33 @@ export const whatsappRepository = {
     return prisma.whatsAppPhoneNumber.findFirst({ where: { metaPhoneNumberId, status: { not: 'DISCONNECTED' } }, include: { account: true } })
   },
 
-  // Same lookup, used by webhook routing — deliberately not status-filtered,
-  // since a REAUTHORIZATION_REQUIRED or ERROR number should still receive
-  // (and record) inbound events, just not be usable for sending.
+  // Webhook routing: phone_number_id -> the ONE tenant that currently holds
+  // it. A REAUTHORIZATION_REQUIRED or ERROR number must still receive (and
+  // record) inbound events, but a DISCONNECTED row must never match —
+  // metaPhoneNumberId isn't unique, and once workspace A disconnects a number
+  // workspace B can legitimately connect the same one (see
+  // findNumberByMetaPhoneNumberId above). Matching A's stale row would route
+  // B's customers' messages into A's inbox.
   findByMetaPhoneNumberId(metaPhoneNumberId: string) {
-    return prisma.whatsAppPhoneNumber.findFirst({ where: { metaPhoneNumberId }, include: { account: true } })
+    return prisma.whatsAppPhoneNumber.findFirst({
+      where: { metaPhoneNumberId, status: { not: 'DISCONNECTED' } },
+      include: { account: true },
+    })
   },
 
   async upsertAccount(
     tenantId: string,
     data: { wabaId: string; businessId: string | null; businessName: string | null; accessTokenCipher: string; tokenExpiresAt: Date | null },
   ) {
-    const existing = await prisma.whatsAppAccount.findFirst({ where: { tenantId } })
-    if (existing) return prisma.whatsAppAccount.update({ where: { id: existing.id }, data })
+    // Keyed by (tenant, WABA), not just tenant: a workspace that connects a
+    // second WABA must get its own account row. Updating "the tenant's
+    // account" in place would swap the token under the first WABA's numbers,
+    // and every send from them would then fail against the wrong token. A
+    // never-connected account (workspaces get an empty one at signup) is
+    // adopted instead of leaving an orphan behind.
+    const sameWaba = await prisma.whatsAppAccount.findFirst({ where: { tenantId, wabaId: data.wabaId } })
+    const target = sameWaba ?? (await prisma.whatsAppAccount.findFirst({ where: { tenantId, wabaId: null } }))
+    if (target) return prisma.whatsAppAccount.update({ where: { id: target.id }, data })
     return prisma.whatsAppAccount.create({ data: { tenantId, ...data } })
   },
 

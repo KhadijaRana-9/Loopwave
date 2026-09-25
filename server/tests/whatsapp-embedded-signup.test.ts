@@ -133,3 +133,86 @@ describe('Embedded Signup completion — our logic against a stubbed Graph API b
     expect(spy).not.toHaveBeenCalled()
   })
 })
+
+// A workspace can connect more than one WABA. Each WABA needs its own account
+// row + token: updating "the tenant's account" in place used to swap the token
+// under the first WABA's numbers. And Meta's docs don't cover the second
+// (fb_exchange_token) exchange for business tokens, so a refusal there must not
+// fail a connection the code exchange already completed.
+describe('Embedded Signup completion — multiple WABAs and the optional token extension', () => {
+  let tenant: TestSession
+  const originalReadiness = integrationReadiness.whatsappSignup
+  const w1 = `waba-multi-1-${Date.now()}`
+  const w2 = `waba-multi-2-${Date.now()}`
+  const p1 = `phone-multi-1-${Date.now()}`
+  const p2 = `phone-multi-2-${Date.now()}`
+
+  function stubMulti(opts: { refuseExtend?: boolean } = {}) {
+    return vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const u = String(input)
+      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+      if (u.includes('fb_exchange_token')) {
+        if (opts.refuseExtend) return json({ error: { message: 'Unsupported token type for exchange', code: 100 } }, 400)
+        const short = new URL(u).searchParams.get('fb_exchange_token')
+        return json({ access_token: `long-${short}`, expires_in: 5_184_000 })
+      }
+      if (u.includes('/oauth/access_token')) return json({ access_token: `tok-${new URL(u).searchParams.get('code')}`, expires_in: 3600 })
+      if (u.includes('/subscribed_apps') || u.includes('/register')) return json({ success: true })
+      for (const w of [w1, w2]) if (u.includes(`/${w}?`)) return json({ id: w, name: `Business ${w}`, owner_business_info: { id: 'biz-1' } })
+      for (const p of [p1, p2]) if (u.includes(`/${p}?`)) return json({ id: p, display_phone_number: '+92 300 0000000', verified_name: 'Biz', quality_rating: 'GREEN' })
+      return json({ error: { message: `Unstubbed Graph call: ${u}`, code: 1 } }, 500)
+    })
+  }
+
+  beforeAll(async () => {
+    tenant = await signupTenant('embedded-multi')
+    await prisma.subscription.update({ where: { tenantId: tenant.tenantId }, data: { planId: 'pro' } }) // plan allows >1 number
+  })
+  beforeEach(() => {
+    integrationReadiness.whatsappSignup = true
+  })
+  afterEach(() => {
+    integrationReadiness.whatsappSignup = originalReadiness
+    vi.restoreAllMocks()
+  })
+  afterAll(async () => {
+    await cleanupTenant(tenant)
+  })
+
+  it('a second WABA gets its own account and token — the first WABA\'s token is not overwritten', async () => {
+    stubMulti()
+    await whatsappService.completeEmbeddedSignup(tenant.tenantId, { code: 'code-one', wabaId: w1, phoneNumberId: p1, label: 'One' })
+    await whatsappService.completeEmbeddedSignup(tenant.tenantId, { code: 'code-two', wabaId: w2, phoneNumberId: p2, label: 'Two' })
+
+    const a1 = await prisma.whatsAppAccount.findFirstOrThrow({ where: { tenantId: tenant.tenantId, wabaId: w1 }, include: { phoneNumbers: true } })
+    const a2 = await prisma.whatsAppAccount.findFirstOrThrow({ where: { tenantId: tenant.tenantId, wabaId: w2 }, include: { phoneNumbers: true } })
+    expect(a1.id).not.toBe(a2.id)
+    expect(decryptSecret(a1.accessTokenCipher!)).toBe('long-tok-code-one')
+    expect(decryptSecret(a2.accessTokenCipher!)).toBe('long-tok-code-two')
+    expect(a1.phoneNumbers.map((n) => n.metaPhoneNumberId)).toEqual([p1])
+    expect(a2.phoneNumbers.map((n) => n.metaPhoneNumberId)).toEqual([p2])
+    // the empty account every workspace gets at signup was adopted, not orphaned
+    expect(await prisma.whatsAppAccount.count({ where: { tenantId: tenant.tenantId, wabaId: null } })).toBe(0)
+  })
+
+  it('keeps the code-exchange token (with its real expiry) when Meta refuses the optional long-lived extension', async () => {
+    const wx = `waba-multi-x-${Date.now()}`
+    const px = `phone-multi-x-${Date.now()}`
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const u = String(input)
+      const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
+      if (u.includes('fb_exchange_token')) return json({ error: { message: 'Unsupported token type for exchange', code: 100 } }, 400)
+      if (u.includes('/oauth/access_token')) return json({ access_token: 'business-token-from-code', expires_in: 5_184_000 })
+      if (u.includes('/subscribed_apps') || u.includes('/register')) return json({ success: true })
+      if (u.includes(`/${wx}?`)) return json({ id: wx, name: 'Business X' })
+      if (u.includes(`/${px}?`)) return json({ id: px, display_phone_number: '+92 300 9999999', verified_name: 'Biz X' })
+      return json({ error: { message: `Unstubbed Graph call: ${u}`, code: 1 } }, 500)
+    })
+    const number = await whatsappService.completeEmbeddedSignup(tenant.tenantId, { code: 'code-x', wabaId: wx, phoneNumberId: px, label: 'X' })
+    expect(number.status).toBe('connected')
+    const account = await prisma.whatsAppAccount.findFirstOrThrow({ where: { tenantId: tenant.tenantId, wabaId: wx } })
+    expect(decryptSecret(account.accessTokenCipher!)).toBe('business-token-from-code')
+    const days = (account.tokenExpiresAt!.getTime() - Date.now()) / 86_400_000
+    expect(days).toBeGreaterThan(59)
+  })
+})

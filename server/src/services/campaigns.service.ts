@@ -10,6 +10,7 @@ import { assertTemplateApproved, assertContactOptedIn } from '@/services/whatsap
 import { recordUsage } from '@/services/usage.service.js'
 import { assertUsageAllowance } from '@/services/planLimits.service.js'
 import { notifyTenant } from '@/services/notifications.service.js'
+import { flagReauthRequired } from '@/services/whatsappConnection.service.js'
 import { enqueueCampaignSend, removeCampaignSend } from '@/jobs/campaigns.queue.js'
 import { serializeTemplate } from '@/utils/serializers.js'
 import { resolveVariableValues, extractVariables, unresolvableVariables } from '@/utils/messageVariables.js'
@@ -110,10 +111,13 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
   const contactById = new Map(contacts.map((c) => [c.id, c]))
   const header = headerMediaParameter(campaign)
 
+  let sentCount = 0
+  let failedCount = 0
   for (const recipient of pending) {
     const contact = contactById.get(recipient.contactId)
     if (!contact?.phone) {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: 'Contact has no phone number on file' })
+      failedCount += 1
       continue
     }
     // Re-checked here, not just at campaign creation — a contact can opt out
@@ -123,6 +127,7 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
       assertContactOptedIn(contact.whatsappOptIn)
     } catch {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: 'Contact opted out before this campaign sent' })
+      failedCount += 1
       continue
     }
 
@@ -141,17 +146,37 @@ export async function dispatchCampaign(tenantId: string, campaignId: string) {
     if (result.status === 'SENT') {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'SENT', waMessageId: result.waMessageId || null, sentAt: new Date(), demo: result.demo })
       if (result.demo) scheduleDemoRecipientProgression(recipient.id)
+      sentCount += 1
+    } else if (result.authError) {
+      // Meta says the token is dead. Every remaining recipient would fail the
+      // same way, so STOP instead of burning through the audience marking each
+      // one FAILED and reporting a "completed" campaign. This recipient and
+      // the rest stay PENDING (they were never attempted with a working
+      // connection); the number is flagged so all further sends are blocked
+      // until the tenant reconnects, and the campaign is marked FAILED.
+      await flagReauthRequired(tenantId)
+      if (sentCount) await recordUsage(tenantId, 'monthlyMarketingMessages', sentCount)
+      await campaignsRepository.update(tenantId, campaignId, { status: 'FAILED' })
+      await notifyTenant(tenantId, {
+        category: 'campaign_failed',
+        title: `Campaign "${campaign.name}" stopped — WhatsApp needs reauthorization`,
+        body: `${sentCount} message${sentCount === 1 ? '' : 's'} went out before Meta rejected the connection; the rest were not sent. Reconnect WhatsApp, then resend.`,
+      })
+      return
     } else {
       await campaignsRepository.updateRecipient(recipient.id, { status: 'FAILED', errorMessage: result.errorMessage })
+      failedCount += 1
     }
   }
 
-  if (pending.length) await recordUsage(tenantId, 'monthlyMarketingMessages', pending.length)
+  // Only messages that actually went out count against the monthly allowance
+  // — a recipient skipped for opt-out / no phone / a Meta rejection was never sent.
+  if (sentCount) await recordUsage(tenantId, 'monthlyMarketingMessages', sentCount)
   await campaignsRepository.update(tenantId, campaignId, { status: 'COMPLETED', completedAt: new Date() })
   await notifyTenant(tenantId, {
     category: 'campaign_completed',
     title: `Campaign "${campaign.name}" completed`,
-    body: `${pending.length} message${pending.length === 1 ? '' : 's'} sent.`,
+    body: `${sentCount} message${sentCount === 1 ? '' : 's'} sent${failedCount ? `, ${failedCount} failed or skipped` : ''}.`,
   })
 }
 

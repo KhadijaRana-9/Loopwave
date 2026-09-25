@@ -55,10 +55,17 @@ export async function runEmbeddedSignup({ appId, configId }) {
       return
     }
     if (data?.type !== 'WA_EMBEDDED_SIGNUP') return
-    if (data.event === 'FINISH') {
+    // Meta's docs: successful completion is FINISH (or a FINISH_* variant);
+    // an abandoned flow AND a Meta-side error both arrive as CANCEL — the
+    // error case is the one carrying data.error_message.
+    if (typeof data.event === 'string' && data.event.startsWith('FINISH')) {
       signupData = { wabaId: data.data?.waba_id, phoneNumberId: data.data?.phone_number_id, businessId: data.data?.business_id }
     } else if (data.event === 'CANCEL') {
-      signupError = new Error(`Connection cancelled at step: ${data.data?.current_step ?? 'unknown'}`)
+      signupError = new Error(
+        data.data?.error_message
+          ? `Meta reported an error: ${data.data.error_message}${data.data?.error_code ? ` (code ${data.data.error_code})` : ''}`
+          : `Connection cancelled${data.data?.current_step ? ` at step: ${data.data.current_step}` : ''}.`,
+      )
     } else if (data.event === 'ERROR') {
       signupError = new Error(data.data?.error_message || 'Meta reported an error while connecting this number.')
     }
@@ -80,6 +87,9 @@ export async function runEmbeddedSignup({ appId, configId }) {
 
     const code = loginResponse?.authResponse?.code
     if (!code) throw new Error('Meta did not return an authorization code — the connection was not completed.')
+    if (signupData?.wabaId && !signupData?.phoneNumberId) {
+      throw new Error('Meta connected the business account but no phone number was registered — run the signup again and add a phone number.')
+    }
     if (!signupData?.wabaId || !signupData?.phoneNumberId) {
       throw new Error('Meta did not report a connected WhatsApp Business Account — the connection was not completed.')
     }

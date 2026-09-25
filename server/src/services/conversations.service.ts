@@ -7,7 +7,7 @@ import { uploadObject, getSignedReadUrl, mediaObjectKey, isStorageConfigured } f
 import { assertMediaAllowed } from '@/utils/mediaLimits.js'
 import { assertCanSendFreeform } from '@/services/whatsappCompliance.service.js'
 import { recordUsage } from '@/services/usage.service.js'
-import { notifyTenant } from '@/services/notifications.service.js'
+import { flagReauthRequired } from '@/services/whatsappConnection.service.js'
 import { decryptSecret } from '@/utils/crypto.js'
 import { ApiError } from '@/utils/apiError.js'
 import { prisma } from '@/config/prisma.js'
@@ -73,15 +73,7 @@ async function resolveSendCredentials(tenantId: string) {
 }
 
 async function flagAuthErrorIfNeeded(tenantId: string, authError: boolean | undefined) {
-  if (!authError) return
-  const connected = await whatsappRepository.getConnectedCredentials(tenantId)
-  if (!connected) return
-  await whatsappRepository.updateNumberStatus(connected.id, 'REAUTHORIZATION_REQUIRED')
-  await notifyTenant(tenantId, {
-    category: 'integration_error',
-    title: 'WhatsApp connection needs reauthorization',
-    body: `Meta rejected a message sent from ${connected.label ?? connected.displayNumber} — reconnect it in WhatsApp settings to resume sending.`,
-  })
+  if (authError) await flagReauthRequired(tenantId)
 }
 
 export const conversationsService = {

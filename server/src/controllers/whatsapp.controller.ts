@@ -67,7 +67,15 @@ export const whatsappController = {
       return res.status(401).json({ error: { code: 'INVALID_SIGNATURE', message: 'Webhook signature verification failed' } })
     }
 
-    const externalId = req.body?.entry?.[0]?.id ?? crypto.randomUUID()
+    // Idempotency key = SHA-256 of the exact signed body. `entry[].id` is NOT
+    // usable: in real Meta payloads it is the WhatsApp Business Account id —
+    // identical on every event that WABA ever sends — so keying on it would
+    // treat every webhook after the first as an "already seen" duplicate and
+    // silently drop all incoming messages, statuses and template updates. Meta
+    // re-delivers an unacknowledged event with the identical body, so the body
+    // hash dedupes true retries while distinct events (different message /
+    // status ids and timestamps) always differ.
+    const externalId = `sha256:${crypto.createHash('sha256').update(rawBody).digest('hex')}`
 
     // The insert itself is the idempotency guard (relies on the @@unique
     // constraint), not a separate find-then-create — two deliveries of the

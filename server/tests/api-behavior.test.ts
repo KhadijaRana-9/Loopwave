@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import request from 'supertest'
 import crypto from 'node:crypto'
-import { app, cleanupTenant, signedWhatsappWebhookPost, signupTenant, type TestSession } from './helpers.js'
+import { app, cleanupTenant, signedWhatsappWebhookPost, signupTenant, whatsappWebhookEventId, type TestSession } from './helpers.js'
 import { prisma } from '@/config/prisma.js'
 
 describe('API behavior: validation, duplicates, not-found, webhooks', () => {
@@ -83,10 +83,11 @@ describe('API behavior: validation, duplicates, not-found, webhooks', () => {
       const second = await signedWhatsappWebhookPost(payload)
       expect(second.status).toBe(200)
 
-      const rows = await prisma.webhookEvent.findMany({ where: { source: 'whatsapp', externalId } })
+      const eventId = whatsappWebhookEventId(JSON.stringify(payload))
+      const rows = await prisma.webhookEvent.findMany({ where: { source: 'whatsapp', externalId: eventId } })
       expect(rows.length).toBe(1)
 
-      await prisma.webhookEvent.deleteMany({ where: { source: 'whatsapp', externalId } })
+      await prisma.webhookEvent.deleteMany({ where: { source: 'whatsapp', externalId: eventId } })
     })
 
     it('turns an inbound message webhook into a real Contact + Conversation + Message', async () => {
@@ -123,12 +124,14 @@ describe('API behavior: validation, duplicates, not-found, webhooks', () => {
       const res = await signedWhatsappWebhookPost(payload)
       expect(res.status).toBe(200)
 
-      const contact = await prisma.contact.findUniqueOrThrow({ where: { tenantId_phone: { tenantId: session.tenantId, phone: fromPhone } } })
+      // Meta sends the sender as bare digits; a contact created from an inbound
+      // message is stored in E.164 (+digits) like every other contact.
+      const contact = await prisma.contact.findUniqueOrThrow({ where: { tenantId_phone: { tenantId: session.tenantId, phone: `+${fromPhone}` } } })
       const conversation = await prisma.conversation.findFirst({ where: { tenantId: session.tenantId, contactId: contact.id }, include: { messages: true } })
       expect(conversation).not.toBeNull()
       expect(conversation?.messages.some((m) => m.direction === 'INBOUND' && m.text === 'Hello from the webhook test')).toBe(true)
 
-      await prisma.webhookEvent.deleteMany({ where: { source: 'whatsapp', externalId } })
+      await prisma.webhookEvent.deleteMany({ where: { source: 'whatsapp', externalId: whatsappWebhookEventId(JSON.stringify(payload)) } })
     }, 60_000)
   })
 

@@ -91,12 +91,18 @@ export async function waitForWhatsappWebhookProcessed(externalId: string, timeou
 // POSTs a genuinely HMAC-signed webhook (same scheme Meta uses:
 // X-Hub-Signature-256 = sha256(rawBody, WHATSAPP_APP_SECRET)) and waits for
 // processing to finish. WHATSAPP_APP_SECRET is a fixture set in vitest.config.ts.
-export async function signedWhatsappWebhookPost(payload: { entry: Array<{ id: string; [key: string]: unknown }> }) {
+// The WebhookEvent idempotency key the controller derives for a delivery:
+// SHA-256 of the exact signed body (NOT entry[].id — that is the WABA id in
+// real Meta payloads and identical on every event).
+export function whatsappWebhookEventId(body: string): string {
+  return `sha256:${crypto.createHash('sha256').update(body).digest('hex')}`
+}
+
+export async function signedWhatsappWebhookPost(payload: object) {
   const body = JSON.stringify(payload)
   const signature = 'sha256=' + crypto.createHmac('sha256', env.WHATSAPP_APP_SECRET).update(body).digest('hex')
   const res = await request(app).post('/api/whatsapp/webhook').set('Content-Type', 'application/json').set('x-hub-signature-256', signature).send(body)
-  // entry[0] always exists by construction at every call site.
-  if (res.status === 200) await waitForWhatsappWebhookProcessed(payload.entry[0]!.id)
+  if (res.status === 200) await waitForWhatsappWebhookProcessed(whatsappWebhookEventId(body))
   return res
 }
 

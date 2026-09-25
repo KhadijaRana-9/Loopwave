@@ -5,20 +5,35 @@ import { ApiError } from '@/utils/apiError.js'
 import { decryptSecret } from '@/utils/crypto.js'
 import * as metaGraph from '@/integrations/metaGraph.js'
 import { MetaGraphError, type MetaTemplateComponent } from '@/integrations/metaGraph.js'
+import { mapMetaTemplateStatus } from '@/utils/metaTemplateStatus.js'
 import type { z } from 'zod'
 import type { createTemplateSchema, updateTemplateSchema } from '@/validators/templates.validators.js'
 import type { Template } from '@prisma/client'
 
+// How many positional {{n}} variables a piece of template text uses (the
+// highest n). Meta requires a sample value for each one at submission time.
+function positionalVariableCount(text: string): number {
+  const indexes = [...text.matchAll(/\{\{(\d+)\}\}/g)].map((m) => Number(m[1]))
+  return indexes.length ? Math.max(...indexes) : 0
+}
+
+function sampleValues(count: number): string[] {
+  return Array.from({ length: count }, (_, i) => `Sample ${i + 1}`)
+}
+
 function buildComponents(template: Pick<Template, 'headerType' | 'header' | 'body' | 'footer' | 'buttons'>): MetaTemplateComponent[] {
   const components: MetaTemplateComponent[] = []
   if (template.headerType !== 'NONE') {
-    components.push(
-      template.headerType === 'TEXT'
-        ? { type: 'HEADER', format: 'TEXT', text: template.header ?? '' }
-        : { type: 'HEADER', format: template.headerType as 'IMAGE' | 'VIDEO' | 'DOCUMENT' },
-    )
+    if (template.headerType === 'TEXT') {
+      const headerText = template.header ?? ''
+      const headerVars = positionalVariableCount(headerText)
+      components.push({ type: 'HEADER', format: 'TEXT', text: headerText, ...(headerVars ? { example: { header_text: sampleValues(headerVars).slice(0, 1) } } : {}) })
+    } else {
+      components.push({ type: 'HEADER', format: template.headerType as 'IMAGE' | 'VIDEO' | 'DOCUMENT' })
+    }
   }
-  components.push({ type: 'BODY', text: template.body })
+  const bodyVars = positionalVariableCount(template.body)
+  components.push({ type: 'BODY', text: template.body, ...(bodyVars ? { example: { body_text: [sampleValues(bodyVars)] } } : {}) })
   if (template.footer) components.push({ type: 'FOOTER', text: template.footer })
   const buttons = Array.isArray(template.buttons) ? (template.buttons as MetaTemplateComponent['buttons']) : []
   if (buttons?.length) components.push({ type: 'BUTTONS', buttons })
@@ -44,20 +59,22 @@ export const templatesService = {
     return updated
   },
 
-  // Without a connected Meta account this stays a local-only PENDING flip —
-  // honest (never silently becomes APPROVED, nothing here claims Meta
-  // reviewed it). With one connected, this is a REAL submission to Meta's
-  // template review; the actual APPROVED/REJECTED/PAUSED outcome arrives
-  // later via the message_template_status_update webhook (whatsappWebhook.service.ts),
-  // not decided here.
+  // A REAL submission to Meta's template review — refused outright when no
+  // WhatsApp Business account is connected (see below), never simulated. The
+  // actual APPROVED/REJECTED/PAUSED outcome arrives later via the
+  // message_template_status_update webhook (whatsappWebhook.service.ts) or a
+  // manual sync, not decided here.
   async submitForReview(tenantId: string, id: string) {
     const template = await templatesRepository.findById(tenantId, id)
     if (!template) throw ApiError.notFound('Template not found')
 
     const connected = await whatsappRepository.getConnectedCredentials(tenantId)
     if (!connected?.account.wabaId || !connected.account.accessTokenCipher) {
-      const updated = await templatesRepository.update(tenantId, id, { status: 'PENDING' })
-      return updated!
+      // Nothing can be submitted without a real WABA. Flipping to PENDING here
+      // would claim "awaiting Meta review" for a template Meta has never seen
+      // (and strand it there — the UI only offers Submit on drafts), so it
+      // stays a DRAFT and the tenant is told exactly what's missing.
+      throw ApiError.badRequest('Connect a WhatsApp Business account before submitting a template to Meta for review.')
     }
 
     try {
@@ -101,10 +118,21 @@ export const templatesService = {
     const now = new Date()
     let synced = 0
     for (const remoteTemplate of remote.data) {
-      const match = local.find((t) => t.metaTemplateId === remoteTemplate.id || (t.name === remoteTemplate.name && !t.metaTemplateId))
+      // Same name can exist once per language on Meta — match on both, or one
+      // language's approval would be applied to another language's row.
+      const sameLanguage = (t: Template) => !remoteTemplate.language || t.language.replace('-', '_') === remoteTemplate.language.replace('-', '_')
+      const match = local.find((t) => t.metaTemplateId === remoteTemplate.id || (t.name === remoteTemplate.name && sameLanguage(t) && !t.metaTemplateId))
       if (!match) continue
-      const status = remoteTemplate.status.toUpperCase() as Template['status']
-      await templatesRepository.update(tenantId, match.id, { status, metaTemplateId: remoteTemplate.id, metaSyncedAt: now })
+      // Through the shared mapper: Meta's vocabulary is wider than our enum
+      // (DISABLED, IN_APPEAL, ...); casting it straight over throws.
+      const status = mapMetaTemplateStatus(remoteTemplate.status)
+      await templatesRepository.update(tenantId, match.id, {
+        ...(status ? { status } : {}),
+        ...(status === 'REJECTED' ? { rejectedReason: remoteTemplate.rejected_reason && remoteTemplate.rejected_reason !== 'NONE' ? remoteTemplate.rejected_reason : null } : {}),
+        ...(status && status !== 'REJECTED' ? { rejectedReason: null } : {}),
+        metaTemplateId: remoteTemplate.id,
+        metaSyncedAt: now,
+      })
       synced += 1
     }
 

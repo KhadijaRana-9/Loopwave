@@ -113,6 +113,24 @@ export const campaignsRepository = {
     return prisma.campaignRecipient.updateMany({ where: { waMessageId }, data })
   },
 
+  // Meta does not guarantee status webhooks arrive in order (a late
+  // "delivered" can land after "read"), so a status may only ADVANCE: it is
+  // applied only if the recipient is currently at an earlier stage. Without
+  // this, campaign delivery/read stats could silently go backwards.
+  advanceRecipientByWaMessageId(
+    waMessageId: string,
+    status: 'SENT' | 'DELIVERED' | 'READ' | 'FAILED',
+    extra: Prisma.CampaignRecipientUncheckedUpdateInput = {},
+  ) {
+    const earlier: Record<typeof status, ('PENDING' | 'SENT' | 'DELIVERED' | 'READ')[]> = {
+      SENT: ['PENDING'],
+      DELIVERED: ['PENDING', 'SENT'],
+      READ: ['PENDING', 'SENT', 'DELIVERED'],
+      FAILED: ['PENDING', 'SENT'],
+    }
+    return prisma.campaignRecipient.updateMany({ where: { waMessageId, status: { in: earlier[status] } }, data: { ...extra, status } })
+  },
+
   addEvent(campaignId: string, type: string, meta: Prisma.InputJsonValue = {}) {
     return prisma.campaignEvent.create({ data: { campaignId, type, meta } })
   },

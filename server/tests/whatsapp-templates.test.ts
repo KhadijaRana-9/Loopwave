@@ -31,13 +31,17 @@ describe('WhatsApp templates — submit-for-review, sync-from-Meta, delete', () 
     return res.body.template
   }
 
-  it('submitting for review without a connected WhatsApp number stays an honest local-only PENDING flip (no Meta id assigned)', async () => {
+  it('refuses to submit without a connected WhatsApp account — the template stays a draft, never a fake "pending Meta review"', async () => {
     const template = await createDraftTemplate()
     const res = await tenant.agent.post(`/api/templates/${template.id}/submit`)
-    expect(res.status).toBe(200)
-    expect(res.body.template.status).toBe('pending')
-    expect(res.body.template.metaTemplateId).toBeNull()
-    expect(res.body.template.submittedAt).toBeNull()
+    expect(res.status).toBe(400)
+    expect(res.body.error.message).toMatch(/connect a whatsapp business account/i)
+
+    const list = await tenant.agent.get('/api/templates')
+    const after = list.body.templates.find((t: { id: string }) => t.id === template.id)
+    expect(after.status).toBe('draft')
+    expect(after.metaTemplateId).toBeNull()
+    expect(after.submittedAt).toBeNull()
   })
 
   it('refuses to sync from Meta — honestly, not silently — when no WhatsApp number is connected', async () => {

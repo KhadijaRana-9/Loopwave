@@ -46,7 +46,7 @@ export async function sendWhatsAppMessage(params: SendMessagePayload): Promise<S
           status: 'FAILED',
           demo: false,
           errorMessage: payload?.error?.message ?? `Meta API error (${res.status})`,
-          authError: payload?.error?.code === 190,
+          authError: isTokenInvalidCode(payload?.error?.code),
         }
       }
       return { waMessageId: payload?.messages?.[0]?.id ?? '', status: 'SENT', demo: false }
@@ -58,8 +58,19 @@ export async function sendWhatsAppMessage(params: SendMessagePayload): Promise<S
   return { waMessageId: `demo_${crypto.randomUUID()}`, status: 'SENT', demo: true }
 }
 
+// Meta OAuthException codes meaning "this token can't be used any more":
+// 190 (invalid/expired/revoked access token, incl. its 458/460/463/467
+// subcodes) and 102 (API session no longer valid). Anything else — rate
+// limits, policy errors, a bad recipient — must NOT flip a healthy
+// connection to REAUTHORIZATION_REQUIRED.
+function isTokenInvalidCode(code: number | undefined): boolean {
+  return code === 190 || code === 102
+}
+
 function buildSendBody(params: SendMessagePayload): Record<string, unknown> {
-  const base = { messaging_product: 'whatsapp', to: params.to }
+  // Contacts store phones however they were typed ("+92 300 1234567");
+  // the Cloud API wants the bare international digits.
+  const base = { messaging_product: 'whatsapp', to: params.to.replace(/\D/g, '') }
   if (params.kind === 'text') return { ...base, type: 'text', text: { body: params.text } }
   if (params.kind === 'media') {
     const mediaObject: Record<string, unknown> = { id: params.mediaId }

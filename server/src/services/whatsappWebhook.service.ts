@@ -8,7 +8,7 @@ import { uploadObject, mediaObjectKey, isStorageConfigured } from '@/integration
 import { decryptSecret } from '@/utils/crypto.js'
 import { getIo } from '@/websocket/io.js'
 import { serializeNotification } from '@/utils/serializers.js'
-import type { TemplateStatus } from '@prisma/client'
+import { mapMetaTemplateStatus } from '@/utils/metaTemplateStatus.js'
 
 // Meta's Cloud API webhook shape (trimmed to the fields we read):
 // entry[].changes[].value.{ metadata.phone_number_id, contacts[].{wa_id,profile.name}, messages[], statuses[] }
@@ -32,14 +32,22 @@ interface MetaWebhookMessage {
   document?: MetaWebhookMedia
 }
 
+interface MetaWebhookStatus {
+  id?: string
+  status?: string
+  errors?: { code?: number; title?: string; message?: string; error_data?: { details?: string } }[]
+}
+
 interface MetaWebhookValue {
   metadata?: { phone_number_id?: string }
   contacts?: { wa_id?: string; profile?: { name?: string } }[]
   messages?: MetaWebhookMessage[]
-  statuses?: { id?: string; status?: string }[]
+  statuses?: MetaWebhookStatus[]
   event?: string
-  message_template_id?: string
-  reason?: string
+  // Meta sends this as a JSON *integer* (e.g. 1689556908129832), unlike the
+  // string id our create-template call stored — always compare via String().
+  message_template_id?: number | string
+  reason?: string | null
 }
 
 interface MetaWebhookPayload {
@@ -55,12 +63,20 @@ const STATUS_MAP: Record<string, 'SENT' | 'DELIVERED' | 'READ' | 'FAILED'> = {
   failed: 'FAILED',
 }
 
-const TEMPLATE_EVENT_MAP: Record<string, TemplateStatus> = {
-  APPROVED: 'APPROVED',
-  REJECTED: 'REJECTED',
-  PAUSED: 'PAUSED',
-  PENDING: 'PENDING',
-  DISABLED: 'PAUSED',
+// A status may only move a message FORWARD — Meta doesn't guarantee webhook
+// ordering, and a late "delivered" arriving after "read" must not regress it.
+const EARLIER_MESSAGE_STATUSES = {
+  SENT: ['QUEUED'],
+  DELIVERED: ['QUEUED', 'SENT'],
+  READ: ['QUEUED', 'SENT', 'DELIVERED'],
+  FAILED: ['QUEUED', 'SENT'],
+} as const
+
+function describeStatusError(status: MetaWebhookStatus): string | undefined {
+  const err = status.errors?.[0]
+  if (!err) return undefined
+  const text = err.error_data?.details ?? err.message ?? err.title ?? 'Message could not be delivered'
+  return err.code ? `${text} (WhatsApp error ${err.code})` : text
 }
 
 const OPT_OUT_KEYWORDS = new Set(['stop', 'unsubscribe', 'stop promotions'])
@@ -100,14 +116,24 @@ export async function processWhatsAppWebhook(payload: MetaWebhookPayload): Promi
       for (const status of value.statuses ?? []) {
         const mapped = status.status ? STATUS_MAP[status.status] : undefined
         if (!status.id || !mapped) continue
-        await prisma.message.updateMany({ where: { waMessageId: status.id }, data: { status: mapped } }).catch(() => {})
+        const errorMessage = mapped === 'FAILED' ? describeStatusError(status) : undefined
+
+        // Forward-only (see EARLIER_MESSAGE_STATUSES). Deliberately NOT
+        // swallowing errors any more: a failed update must surface on the
+        // WebhookEvent row (errorMessage) so a retry/investigation is possible,
+        // not silently leave a message stuck at an old status.
+        await prisma.message.updateMany({
+          where: { waMessageId: status.id, status: { in: [...EARLIER_MESSAGE_STATUSES[mapped]] } },
+          data: { status: mapped, ...(errorMessage ? { errorMessage } : {}) },
+        })
 
         // Same status event also drives campaign recipient/analytics state
         // for real Meta sends — demo-mode sends get this from
         // scheduleDemoRecipientProgression instead (see whatsapp.adapter.ts).
         if (mapped === 'DELIVERED' || mapped === 'READ' || mapped === 'FAILED') {
-          const recipientData = mapped === 'DELIVERED' ? { status: mapped, deliveredAt: new Date() } : mapped === 'READ' ? { status: mapped, readAt: new Date() } : { status: mapped }
-          await campaignsRepository.updateRecipientByWaMessageId(status.id, recipientData).catch(() => {})
+          const extra =
+            mapped === 'DELIVERED' ? { deliveredAt: new Date() } : mapped === 'READ' ? { readAt: new Date() } : { errorMessage: errorMessage ?? 'Message could not be delivered' }
+          await campaignsRepository.advanceRecipientByWaMessageId(status.id, mapped, extra)
         }
       }
     }
@@ -115,25 +141,24 @@ export async function processWhatsAppWebhook(payload: MetaWebhookPayload): Promi
 }
 
 async function handleTemplateStatusUpdate(value: MetaWebhookValue) {
-  if (!value.message_template_id) return
-  const status = value.event ? TEMPLATE_EVENT_MAP[value.event] : undefined
+  if (value.message_template_id === undefined || value.message_template_id === null) return
+  const status = mapMetaTemplateStatus(value.event)
   if (!status) return
-  await prisma.template
-    .updateMany({
-      where: { metaTemplateId: value.message_template_id },
-      data: { status, rejectedReason: status === 'REJECTED' ? (value.reason ?? null) : null },
-    })
-    .catch(() => {})
+  await prisma.template.updateMany({
+    // String(): Meta sends the id as an integer, we stored it as a string.
+    where: { metaTemplateId: String(value.message_template_id) },
+    data: {
+      status,
+      rejectedReason: status === 'REJECTED' && value.reason && value.reason !== 'NONE' ? value.reason : null,
+      metaSyncedAt: new Date(),
+    },
+  })
 }
 
 async function handleInboundMessage(tenantId: string, message: MetaWebhookMessage, contacts: MetaWebhookValue['contacts'], accessToken: string | null) {
   const contactName = contacts?.find((c) => c.wa_id === message.from)?.profile?.name ?? message.from!
 
-  const contact = await prisma.contact.upsert({
-    where: { tenantId_phone: { tenantId, phone: message.from! } },
-    create: { tenantId, name: contactName, phone: message.from!, source: 'WhatsApp' },
-    update: { lastInteractionAt: new Date() },
-  })
+  const contact = await findOrCreateInboundContact(tenantId, message.from!, contactName)
 
   const bodyText = message.text?.body ?? null
   await applyOptInSignal(tenantId, contact.id, contact.whatsappOptIn, bodyText, message.from!, accessToken)
@@ -169,6 +194,27 @@ async function handleInboundMessage(tenantId: string, message: MetaWebhookMessag
   })
   getIo()?.to(`tenant:${tenantId}`).emit('conversation:message', { conversationId: conversation.id })
   getIo()?.to(`tenant:${tenantId}`).emit('notification:new', serializeNotification(notification))
+}
+
+// Meta delivers `from` as bare digits ("923001234567") while contacts are
+// stored E.164 ("+923001234567"). Upserting on the raw value would create a
+// SECOND contact for every existing customer who replies — splitting the
+// conversation and leaving the original contact's opt-in state untouched —
+// so match either spelling first and store new contacts as E.164.
+async function findOrCreateInboundContact(tenantId: string, from: string, name: string) {
+  const digits = from.replace(/\D/g, '')
+  const candidates = [`+${digits}`, digits]
+  const existing = await prisma.contact.findFirst({ where: { tenantId, phone: { in: candidates } } })
+  if (existing) return prisma.contact.update({ where: { id: existing.id }, data: { lastInteractionAt: new Date() } })
+  try {
+    return await prisma.contact.create({ data: { tenantId, name, phone: `+${digits}`, source: 'WhatsApp' } })
+  } catch (err) {
+    // Two messages from a brand-new contact processed concurrently: the
+    // loser hits the (tenantId, phone) unique constraint — use the winner's row.
+    const raced = await prisma.contact.findFirst({ where: { tenantId, phone: { in: candidates } } })
+    if (raced) return raced
+    throw err
+  }
 }
 
 // A user messaging in is treated as implicit consent (standard practice

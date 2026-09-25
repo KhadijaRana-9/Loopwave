@@ -44,8 +44,9 @@ export default function Templates() {
     mutationFn: templatesService.submitTemplateForReview,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast.success('Template submitted for review')
+      toast.success('Template submitted to Meta for review')
     },
+    onError: (err) => toast.error(err.message || 'Could not submit this template'),
   })
 
   const deleteMutation = useMutation({
