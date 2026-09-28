@@ -123,6 +123,17 @@ export default function Signup() {
             <Button type="submit" loading={status === 'loading'} className="mt-1 w-full justify-center">
               {status === 'loading' ? 'Creating workspace...' : 'Create workspace'}
             </Button>
+            <p className="text-center text-xs text-ink-500">
+              By creating a workspace you agree to our{' '}
+              <Link to="/terms" className="font-medium text-brand-600 hover:underline">
+                Terms of Service
+              </Link>{' '}
+              and{' '}
+              <Link to="/privacy" className="font-medium text-brand-600 hover:underline">
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </form>
         </div>
         <p className="mt-5 text-center text-sm text-ink-500">

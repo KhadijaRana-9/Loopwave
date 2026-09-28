@@ -80,7 +80,7 @@ export default function PublicLayout() {
 
       <footer className="border-t border-ink-100 bg-ink-950 text-ink-300">
         <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-          <div className="grid grid-cols-2 gap-8 md:grid-cols-5">
+          <div className="grid grid-cols-2 gap-8 md:grid-cols-6">
             <div className="col-span-2">
               <Logo dark />
               <p className="mt-3 max-w-xs text-sm text-ink-400">
@@ -110,9 +110,28 @@ export default function PublicLayout() {
                 { label: 'Start free trial', to: '/signup' },
               ]}
             />
+            <FooterColumn
+              title="Legal"
+              links={[
+                { label: 'Privacy Policy', to: '/privacy' },
+                { label: 'Terms of Service', to: '/terms' },
+                { label: 'Data Deletion', to: '/data-deletion' },
+              ]}
+            />
           </div>
-          <div className="mt-10 border-t border-ink-800 pt-6 text-xs text-ink-500">
-            © {new Date().getFullYear()} Loopwave. All rights reserved.
+          <div className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-ink-800 pt-6 text-xs text-ink-500">
+            <span>© {new Date().getFullYear()} Loopwave. All rights reserved.</span>
+            <span className="flex gap-4">
+              <Link to="/privacy" className="hover:text-white">
+                Privacy
+              </Link>
+              <Link to="/terms" className="hover:text-white">
+                Terms
+              </Link>
+              <Link to="/data-deletion" className="hover:text-white">
+                Data deletion
+              </Link>
+            </span>
           </div>
         </div>
       </footer>

@@ -19,6 +19,9 @@ const Pricing = lazy(() => import('@/pages/public/Pricing'))
 const IntegrationsMarketing = lazy(() => import('@/pages/public/Integrations'))
 const Resources = lazy(() => import('@/pages/public/Resources'))
 const Contact = lazy(() => import('@/pages/public/Contact'))
+const PrivacyPolicy = lazy(() => import('@/pages/public/PrivacyPolicy'))
+const TermsOfService = lazy(() => import('@/pages/public/TermsOfService'))
+const DataDeletion = lazy(() => import('@/pages/public/DataDeletion'))
 
 // Auth
 const Login = lazy(() => import('@/pages/auth/Login'))
@@ -85,6 +88,9 @@ export default function App() {
           <Route path="/integrations" element={<IntegrationsMarketing />} />
           <Route path="/resources" element={<Resources />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/privacy" element={<PrivacyPolicy />} />
+          <Route path="/terms" element={<TermsOfService />} />
+          <Route path="/data-deletion" element={<DataDeletion />} />
         </Route>
 
         <Route path="/login" element={<Login />} />
