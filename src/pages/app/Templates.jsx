@@ -61,7 +61,9 @@ export default function Templates() {
     mutationFn: templatesService.syncTemplates,
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
-      toast.success(`Synced ${result.synced} of ${result.total} template${result.total === 1 ? '' : 's'} from Meta`)
+      const parts = [`${result.synced} updated`, `${result.imported} imported`]
+      if (result.skipped) parts.push(`${result.skipped} skipped (variables, carousel or plan limit)`)
+      toast.success(`Meta has ${result.total} template${result.total === 1 ? '' : 's'}: ${parts.join(', ')}`)
     },
     onError: (err) => toast.error(err.message || 'Could not sync with Meta'),
   })

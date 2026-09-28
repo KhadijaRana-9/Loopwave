@@ -116,12 +116,24 @@ export interface MetaTemplateComponent {
   buttons?: { type: string; text: string; url?: string; phone_number?: string }[]
 }
 
+// A component as Meta RETURNS it — wider than what we submit (MetaTemplateComponent):
+// existing templates can carry carousels, offers, etc. that this app doesn't build.
+export interface MetaRemoteComponent {
+  type: string
+  format?: string
+  text?: string
+  buttons?: { type: string; text: string; url?: string; phone_number?: string }[]
+}
+
 export interface MetaTemplateSummary {
   id: string
   name: string
   status: string
   language?: string
   rejected_reason?: string
+  category?: string
+  parameter_format?: string
+  components?: MetaRemoteComponent[]
 }
 
 export async function createMetaTemplate(
@@ -144,7 +156,8 @@ export async function listMetaTemplates(wabaId: string, accessToken: string): Pr
   const all: MetaTemplateSummary[] = []
   let after: string | undefined
   for (let page = 0; page < 20; page++) {
-    const query = new URLSearchParams({ fields: 'id,name,status,language,rejected_reason', limit: '100' })
+    // Components make each row much larger than the id/status summary, so pages are smaller than before.
+    const query = new URLSearchParams({ fields: 'id,name,status,language,rejected_reason,category,parameter_format,components', limit: '50' })
     if (after) query.set('after', after)
     const res = await graphFetch<{ data: MetaTemplateSummary[]; paging?: { cursors?: { after?: string }; next?: string } }>(
       `/${wabaId}/message_templates?${query}`,

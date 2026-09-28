@@ -352,4 +352,56 @@ describe('Meta contract — template submission and sync', () => {
     expect(await row(mystery.id)).toMatchObject({ status: 'PENDING', metaTemplateId: '404' }) // an unknown Meta status must not throw or clobber the local state
     expect((await row(promoEn.id)).metaSyncedAt).not.toBeNull()
   })
+
+  it("sync imports the approved templates that already exist on the WABA (Meta's real component shapes), skips the ones it can't send faithfully, and never duplicates on a re-sync", async () => {
+    const t = uniq()
+    // Shapes copied from what Meta's Graph API really returned for a test WABA's templates.
+    const remote = [
+      {
+        id: '7001', name: `hello_${t}`, status: 'APPROVED', language: 'en_US', category: 'UTILITY', parameter_format: 'POSITIONAL',
+        components: [
+          { type: 'HEADER', format: 'TEXT', text: 'Hello World' },
+          { type: 'BODY', text: 'Welcome and congratulations!! This message demonstrates your ability to send a WhatsApp message notification.' },
+          { type: 'FOOTER', text: 'WhatsApp Business Platform sample message' },
+        ],
+      },
+      {
+        id: '7002', name: `order_${t}`, status: 'APPROVED', language: 'en_US', category: 'UTILITY', parameter_format: 'POSITIONAL',
+        components: [{ type: 'HEADER', format: 'TEXT', text: 'Order confirmed' }, { type: 'BODY', text: 'Hi {{1}}, your order number is {{2}}.' }],
+      },
+      {
+        id: '7003', name: `carousel_${t}`, status: 'APPROVED', language: 'en_US', category: 'MARKETING', parameter_format: 'POSITIONAL',
+        components: [{ type: 'BODY', text: 'Fresh summer recipes.' }, { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Get free delivery', url: 'https://example.com/x' }] }, { type: 'CAROUSEL', cards: [{}, {}] }],
+      },
+      {
+        id: '7004', name: `image_${t}`, status: 'APPROVED', language: 'en_US', category: 'MARKETING', parameter_format: 'POSITIONAL',
+        components: [
+          { type: 'HEADER', format: 'IMAGE' },
+          { type: 'BODY', text: 'Free delivery for all online orders' },
+          { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Get free delivery', url: 'https://developers.facebook.com/' }] },
+        ],
+      },
+      { id: '7005', name: `named_${t}`, status: 'APPROVED', language: 'en_US', category: 'UTILITY', parameter_format: 'NAMED', components: [{ type: 'BODY', text: 'Hi.' }] },
+      { id: '7006', name: `flagged_${t}`, status: 'FLAGGED', language: 'en_US', category: 'UTILITY', parameter_format: 'POSITIONAL', components: [{ type: 'BODY', text: 'Hi.' }] },
+    ]
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json({ data: remote }))
+
+    const first = await templatesService.syncFromMeta(tenantE.tenantId)
+    expect(first).toEqual({ synced: 0, imported: 2, skipped: 4, total: 6 })
+
+    const byName = async (name: string) => prisma.template.findMany({ where: { tenantId: tenantE.tenantId, name } })
+    const [hello] = await byName(`hello_${t}`)
+    expect(hello).toMatchObject({ status: 'APPROVED', category: 'utility', language: 'en_US', headerType: 'TEXT', header: 'Hello World', footer: 'WhatsApp Business Platform sample message', metaTemplateId: '7001', variables: [] })
+    expect(hello!.metaSyncedAt).not.toBeNull()
+    const [image] = await byName(`image_${t}`)
+    expect(image).toMatchObject({ status: 'APPROVED', headerType: 'IMAGE', header: null, metaTemplateId: '7004' })
+    expect(image!.buttons).toEqual([{ type: 'URL', text: 'Get free delivery', url: 'https://developers.facebook.com/' }])
+    for (const skipped of ['order', 'carousel', 'named', 'flagged']) expect(await byName(`${skipped}_${t}`)).toHaveLength(0)
+
+    // Re-sync: the imported rows now match by Meta id — reconciled, not duplicated.
+    const second = await templatesService.syncFromMeta(tenantE.tenantId)
+    expect(second).toEqual({ synced: 2, imported: 0, skipped: 4, total: 6 })
+    expect(await byName(`hello_${t}`)).toHaveLength(1)
+    expect(await byName(`image_${t}`)).toHaveLength(1)
+  })
 })
