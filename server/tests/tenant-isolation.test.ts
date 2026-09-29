@@ -58,8 +58,17 @@ describe('multi-tenant isolation (IDOR)', () => {
     const formRes = await tenantA.agent.post('/api/forms').send({ name: 'Tenant A Form', fields: [] })
     formId = formRes.body.form.id
 
-    const whatsappRes = await tenantA.agent.post('/api/whatsapp/connect').send({ label: 'Tenant A Line', phoneNumber: `+1555${Date.now()}`.slice(0, 13) })
-    whatsappNumberId = whatsappRes.body.id
+    // POST /whatsapp/connect now requires a real Meta Embedded Signup code,
+    // which no test can obtain (see api-behavior.test.ts), so a connected
+    // number is seeded directly, the same way — otherwise this fixture would
+    // 400 with "not configured", leave whatsappNumberId undefined, and the
+    // isolation assertions below would trivially pass for the wrong reason
+    // (no resource exists) instead of proving anything about tenant isolation.
+    const whatsappAccount = await prisma.whatsAppAccount.create({ data: { tenantId: tenantA.tenantId, wabaId: `waba-tenantA-${Date.now()}` } })
+    const whatsappNumber = await prisma.whatsAppPhoneNumber.create({
+      data: { accountId: whatsappAccount.id, displayNumber: `+1555${Date.now()}`.slice(0, 13), label: 'Tenant A Line', metaPhoneNumberId: `meta-pn-tenantA-${Date.now()}`, status: 'CONNECTED', connectedAt: new Date() },
+    })
+    whatsappNumberId = whatsappNumber.id
 
     // No "start a conversation" endpoint exists yet (agents only reply to
     // existing threads) — seeded directly via Prisma, which is a legitimate
@@ -67,7 +76,13 @@ describe('multi-tenant isolation (IDOR)', () => {
     // through the real API.
     const conversation = await prisma.conversation.create({ data: { tenantId: tenantA.tenantId, contactId } })
     conversationId = conversation.id
-  })
+    // This fixture makes ~10 sequential real HTTP+DB round trips (deliberately
+    // real, not direct repository calls — see the file comment above), which
+    // against the remote Neon database can land right at the default 60s
+    // hookTimeout (observed at 60-65s). The extra time is Neon round-trip
+    // latency, not a code problem — give the hook more room instead of
+    // fighting for milliseconds against a network fixed cost.
+  }, 120_000)
 
   afterAll(async () => {
     await cleanupTenant(tenantA)

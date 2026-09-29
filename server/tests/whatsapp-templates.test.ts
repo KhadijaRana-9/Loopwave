@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { cleanupTenant, hasLiveWhatsappCredentials, signupTenant, type TestSession } from './helpers.js'
+import { prisma } from '@/config/prisma.js'
 
 // No real Meta App is configured in this environment (same as every
 // environment right now — see the WhatsApp integration audit), so what's
@@ -48,6 +49,25 @@ describe('WhatsApp templates — submit-for-review, sync-from-Meta, delete', () 
     const res = await tenant.agent.post('/api/templates/sync')
     expect(res.status).toBe(400)
     expect(res.body.error.message).toMatch(/connect a real whatsapp number/i)
+  })
+
+  it('tells a REAUTHORIZATION_REQUIRED tenant to reconnect, not to "connect", for both submit and sync', async () => {
+    const account = await prisma.whatsAppAccount.create({ data: { tenantId: tenant.tenantId, wabaId: `waba-${Date.now()}` } })
+    await prisma.whatsAppPhoneNumber.create({ data: { accountId: account.id, displayNumber: '+15550009999', label: 'Needs reauth', status: 'REAUTHORIZATION_REQUIRED' } })
+    try {
+      const template = await createDraftTemplate()
+      const submit = await tenant.agent.post(`/api/templates/${template.id}/submit`)
+      expect(submit.status).toBe(400)
+      expect(submit.body.error.message).toMatch(/reauthorized/i)
+      expect(submit.body.error.message).not.toMatch(/^Connect a WhatsApp Business account/i)
+
+      const sync = await tenant.agent.post('/api/templates/sync')
+      expect(sync.status).toBe(400)
+      expect(sync.body.error.message).toMatch(/reauthorized/i)
+      expect(sync.body.error.message).not.toMatch(/^Connect a real WhatsApp number/i)
+    } finally {
+      await prisma.whatsAppAccount.deleteMany({ where: { id: account.id } })
+    }
   })
 
   it('deleting a draft template that was never submitted to Meta just removes it locally', async () => {

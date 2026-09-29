@@ -74,7 +74,11 @@ export const templatesService = {
       // Nothing can be submitted without a real WABA. Flipping to PENDING here
       // would claim "awaiting Meta review" for a template Meta has never seen
       // (and strand it there — the UI only offers Submit on drafts), so it
-      // stays a DRAFT and the tenant is told exactly what's missing.
+      // stays a DRAFT and the tenant is told exactly what's missing — and,
+      // same as syncFromMeta below, told to reconnect rather than "connect"
+      // when a number IS connected but needs reauthorization.
+      const blocked = await whatsappRepository.findRequiringReauth(tenantId)
+      if (blocked) throw ApiError.badRequest('Your WhatsApp connection needs to be reauthorized before submitting a template — reconnect it in WhatsApp settings.')
       throw ApiError.badRequest('Connect a WhatsApp Business account before submitting a template to Meta for review.')
     }
 
@@ -115,6 +119,11 @@ export const templatesService = {
   }> {
     const connected = await whatsappRepository.getConnectedCredentials(tenantId)
     if (!connected?.account.wabaId || !connected.account.accessTokenCipher) {
+      // Distinguish "nothing connected" from "connected but needs reconnecting" —
+      // the fix is different (Connect vs Reconnect) and the generic message was
+      // confusing on a REAUTHORIZATION_REQUIRED/ERROR number, which IS connected.
+      const blocked = await whatsappRepository.findRequiringReauth(tenantId)
+      if (blocked) throw ApiError.badRequest('Your WhatsApp connection needs to be reauthorized before syncing templates — reconnect it in WhatsApp settings.')
       throw ApiError.badRequest('Connect a real WhatsApp number before syncing templates with Meta.')
     }
 
