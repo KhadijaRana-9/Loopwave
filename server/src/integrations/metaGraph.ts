@@ -123,6 +123,7 @@ export interface MetaRemoteComponent {
   format?: string
   text?: string
   buttons?: { type: string; text: string; url?: string; phone_number?: string }[]
+  cards?: unknown[] // CAROUSEL components carry their cards (each with its own header/body/buttons)
 }
 
 export interface MetaTemplateSummary {

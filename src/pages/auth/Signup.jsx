@@ -89,7 +89,7 @@ export default function Signup() {
         </div>
         <div className="rounded-xl border border-ink-200 bg-white p-6 shadow-sm">
           <h1 className="text-lg font-semibold text-ink-900">Start your free trial</h1>
-          <p className="mt-1 text-sm text-ink-500">14 days on the Pro plan. No card required for this demo.</p>
+          <p className="mt-1 text-sm text-ink-500">Create your workspace to connect WhatsApp, manage conversations and run campaigns.</p>
           <form onSubmit={handleSubmit} noValidate className="mt-5 flex flex-col gap-4">
             <Input
               id="signup-workspace"

@@ -58,10 +58,18 @@ export async function inviteAndLogin(owner: TestSession, role: string): Promise<
   return { agent, tenantId: owner.tenantId, userId, email }
 }
 
+// Also removes every OTHER user that was invited into the tenant during the
+// test (team-invite tests create real User rows). Deleting only the tenant and
+// the session user left one orphan `dup-…@test.loopwave.internal` user per run
+// in the shared Neon database. The email-domain guard means a real user can
+// never be deleted here, whatever memberships the tenant had.
 export async function cleanupTenant(session: TestSession | null | undefined) {
   if (!session) return
+  const memberships = await prisma.membership.findMany({ where: { tenantId: session.tenantId }, select: { userId: true } })
   await prisma.tenant.deleteMany({ where: { id: session.tenantId } })
-  await prisma.user.deleteMany({ where: { id: session.userId } })
+  await prisma.user.deleteMany({
+    where: { id: { in: [...new Set([session.userId, ...memberships.map((m) => m.userId)])] }, email: { endsWith: '@test.loopwave.internal' } },
+  })
 }
 
 export async function cleanupUser(session: TestSession | null | undefined) {

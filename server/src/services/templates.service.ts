@@ -6,7 +6,7 @@ import { decryptSecret } from '@/utils/crypto.js'
 import * as metaGraph from '@/integrations/metaGraph.js'
 import { MetaGraphError, type MetaTemplateComponent } from '@/integrations/metaGraph.js'
 import { mapMetaTemplateStatus } from '@/utils/metaTemplateStatus.js'
-import { toImportableTemplate } from '@/utils/metaTemplateImport.js'
+import { toImportableTemplate, toSkippedTemplate, type SkippedTemplate } from '@/utils/metaTemplateImport.js'
 import type { z } from 'zod'
 import type { createTemplateSchema, updateTemplateSchema } from '@/validators/templates.validators.js'
 import { Prisma, type Template } from '@prisma/client'
@@ -102,8 +102,17 @@ export const templatesService = {
   // webhook event, if ever.
   // synced = local rows reconciled with Meta; imported = templates that existed
   // only on Meta and were brought in; skipped = Meta-only templates that can't
-  // be sent faithfully from here (variables, carousel, ...) or hit the plan limit.
-  async syncFromMeta(tenantId: string): Promise<{ synced: number; imported: number; skipped: number; total: number }> {
+  // be sent faithfully from here (variables, carousel, ...) or hit the plan
+  // limit. importedTemplates / skippedTemplates list every one of them (with the
+  // reason for each skip), so the counts can always be checked against the rows.
+  async syncFromMeta(tenantId: string): Promise<{
+    synced: number
+    imported: number
+    skipped: number
+    total: number
+    importedTemplates: { name: string; language: string }[]
+    skippedTemplates: SkippedTemplate[]
+  }> {
     const connected = await whatsappRepository.getConnectedCredentials(tenantId)
     if (!connected?.account.wabaId || !connected.account.accessTokenCipher) {
       throw ApiError.badRequest('Connect a real WhatsApp number before syncing templates with Meta.')
@@ -121,8 +130,8 @@ export const templatesService = {
     const local = await templatesRepository.list(tenantId)
     const now = new Date()
     let synced = 0
-    let imported = 0
-    let skipped = 0
+    const importedTemplates: { name: string; language: string }[] = []
+    const skippedTemplates: SkippedTemplate[] = []
     for (const remoteTemplate of remote.data) {
       // Same name can exist once per language on Meta — match on both, or one
       // language's approval would be applied to another language's row.
@@ -134,22 +143,23 @@ export const templatesService = {
         // in if it can be sent faithfully, otherwise count it as skipped.
         const importable = toImportableTemplate(remoteTemplate)
         if (!importable.ok) {
-          skipped += 1
+          skippedTemplates.push(toSkippedTemplate(remoteTemplate, importable.code, importable.reason))
           continue
         }
         try {
           // Imported rows count against the plan's template limit like any other.
-          await assertUnderLimit(tenantId, 'templates', local.length + imported)
+          await assertUnderLimit(tenantId, 'templates', local.length + importedTemplates.length)
           await templatesRepository.create(tenantId, { ...importable.data, metaSyncedAt: now })
-          imported += 1
+          importedTemplates.push({ name: importable.data.name, language: importable.data.language })
         } catch (err) {
-          if (err instanceof ApiError) {
-            skipped += 1
-            continue
+          if (err instanceof ApiError && err.code === 'PLAN_LIMIT_REACHED') {
+            skippedTemplates.push(toSkippedTemplate(remoteTemplate, 'PLAN_LIMIT', "Your plan's template limit has been reached. Delete a template or upgrade, then sync again"))
+          } else if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+            // Same name+language already exists locally under a different Meta id — never overwrite it.
+            skippedTemplates.push(toSkippedTemplate(remoteTemplate, 'NAME_CONFLICT', 'A template with this name and language already exists here and is linked to a different Meta template'))
+          } else {
+            throw err
           }
-          // Same name+language already exists locally under a different Meta id — never overwrite it.
-          if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') skipped += 1
-          else throw err
         }
         continue
       }
@@ -166,7 +176,14 @@ export const templatesService = {
       synced += 1
     }
 
-    return { synced, imported, skipped, total: remote.data.length }
+    return {
+      synced,
+      imported: importedTemplates.length,
+      skipped: skippedTemplates.length,
+      total: remote.data.length,
+      importedTemplates,
+      skippedTemplates,
+    }
   },
 
   async remove(tenantId: string, id: string) {

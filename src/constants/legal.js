@@ -9,7 +9,8 @@ export const LEGAL = {
   legalEntityName: null, // registered name of the company that operates Loopwave
   registeredAddress: null, // registered postal address
   jurisdiction: null, // governing law and courts, e.g. "the laws of <country/state>"
-  contactEmail: null, // general contact
+  contactEmail: null, // general contact (also shown on the public Contact page)
+  contactPhone: null, // optional public phone number (shown on the Contact page)
   privacyEmail: null, // privacy, data-subject and data-deletion requests
   dataProtectionOfficer: null, // optional: name/contact if one is appointed
   effectiveDate: '28 September 2026',

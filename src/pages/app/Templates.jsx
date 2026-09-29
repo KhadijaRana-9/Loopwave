@@ -15,14 +15,17 @@ import * as templatesService from '@/services/templatesService'
 import { WHATSAPP_LANGUAGES } from '@/constants/whatsappLanguages'
 import LanguagePicker from '@/components/ui/LanguagePicker'
 import { renderPreviewText } from '@/utils/messagePreview'
+import SyncResultPanel from '@/features/templates/SyncResultPanel'
 
-const STATUS_TONE = { draft: 'neutral', approved: 'success', pending: 'warning', rejected: 'danger' }
+// paused = Meta paused/disabled/archived it; it can't be sent until Meta reinstates it.
+const STATUS_TONE = { draft: 'neutral', approved: 'success', pending: 'warning', rejected: 'danger', paused: 'warning' }
 const EMPTY_FORM = { name: '', category: 'marketing', language: 'en_US', body: '' }
 
 export default function Templates() {
   const [formOpen, setFormOpen] = useState(false)
   const [editingId, setEditingId] = useState(null)
   const [previewTemplate, setPreviewTemplate] = useState(null)
+  const [syncResult, setSyncResult] = useState(null)
   const [form, setForm] = useState(EMPTY_FORM)
   const queryClient = useQueryClient()
 
@@ -61,9 +64,8 @@ export default function Templates() {
     mutationFn: templatesService.syncTemplates,
     onSuccess: (result) => {
       queryClient.invalidateQueries({ queryKey: ['templates'] })
-      const parts = [`${result.synced} updated`, `${result.imported} imported`]
-      if (result.skipped) parts.push(`${result.skipped} skipped (variables, carousel or plan limit)`)
-      toast.success(`Meta has ${result.total} template${result.total === 1 ? '' : 's'}: ${parts.join(', ')}`)
+      setSyncResult(result)
+      toast.success(`Synced with Meta: ${result.synced} updated, ${result.imported} imported, ${result.skipped} skipped`)
     },
     onError: (err) => toast.error(err.message || 'Could not sync with Meta'),
   })
@@ -140,6 +142,8 @@ export default function Templates() {
           </div>
         }
       />
+
+      {syncResult && <SyncResultPanel result={syncResult} onDismiss={() => setSyncResult(null)} />}
 
       {templatesQuery.isLoading ? (
         <Spinner />

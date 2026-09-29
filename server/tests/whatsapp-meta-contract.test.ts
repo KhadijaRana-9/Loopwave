@@ -371,7 +371,11 @@ describe('Meta contract — template submission and sync', () => {
       },
       {
         id: '7003', name: `carousel_${t}`, status: 'APPROVED', language: 'en_US', category: 'MARKETING', parameter_format: 'POSITIONAL',
-        components: [{ type: 'BODY', text: 'Fresh summer recipes.' }, { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Get free delivery', url: 'https://example.com/x' }] }, { type: 'CAROUSEL', cards: [{}, {}] }],
+        components: [
+          { type: 'BODY', text: 'Fresh summer recipes.' },
+          { type: 'BUTTONS', buttons: [{ type: 'URL', text: 'Get free delivery', url: 'https://example.com/x' }] },
+          { type: 'CAROUSEL', cards: [{ components: [{ type: 'HEADER', format: 'IMAGE' }] }, { components: [{ type: 'HEADER', format: 'IMAGE' }] }] },
+        ],
       },
       {
         id: '7004', name: `image_${t}`, status: 'APPROVED', language: 'en_US', category: 'MARKETING', parameter_format: 'POSITIONAL',
@@ -387,7 +391,16 @@ describe('Meta contract — template submission and sync', () => {
     vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json({ data: remote }))
 
     const first = await templatesService.syncFromMeta(tenantE.tenantId)
-    expect(first).toEqual({ synced: 0, imported: 2, skipped: 4, total: 6 })
+    expect(first).toMatchObject({ synced: 0, imported: 2, skipped: 4, total: 6 })
+    // The counts are derived from the lists, so what is reported as imported/skipped is exactly what happened.
+    expect(first.importedTemplates.map((x) => x.name).sort()).toEqual([`hello_${t}`, `image_${t}`].sort())
+    const skippedBy = Object.fromEntries(first.skippedTemplates.map((s) => [s.name, s]))
+    expect(Object.keys(skippedBy).sort()).toEqual([`carousel_${t}`, `flagged_${t}`, `named_${t}`, `order_${t}`].sort())
+    expect(skippedBy[`order_${t}`]).toMatchObject({ code: 'BODY_HAS_VARIABLES', language: 'en_US', metaStatus: 'APPROVED', requiresVariables: true, isCarousel: false, hasMediaHeader: false, unsupported: false, planLimit: false })
+    expect(skippedBy[`carousel_${t}`]).toMatchObject({ code: 'CAROUSEL', isCarousel: true, hasMediaHeader: true, requiresVariables: false, planLimit: false })
+    expect(skippedBy[`named_${t}`]).toMatchObject({ code: 'NAMED_PARAMETERS', unsupported: true, requiresVariables: false, planLimit: false })
+    expect(skippedBy[`flagged_${t}`]).toMatchObject({ code: 'STATUS_UNMAPPED', unsupported: true, metaStatus: 'FLAGGED', planLimit: false })
+    expect(first.skippedTemplates.every((s) => s.reason.length > 0)).toBe(true)
 
     const byName = async (name: string) => prisma.template.findMany({ where: { tenantId: tenantE.tenantId, name } })
     const [hello] = await byName(`hello_${t}`)
@@ -400,8 +413,35 @@ describe('Meta contract — template submission and sync', () => {
 
     // Re-sync: the imported rows now match by Meta id — reconciled, not duplicated.
     const second = await templatesService.syncFromMeta(tenantE.tenantId)
-    expect(second).toEqual({ synced: 2, imported: 0, skipped: 4, total: 6 })
+    expect(second).toMatchObject({ synced: 2, imported: 0, skipped: 4, total: 6 })
+    expect(second.importedTemplates).toEqual([])
     expect(await byName(`hello_${t}`)).toHaveLength(1)
     expect(await byName(`image_${t}`)).toHaveLength(1)
+  })
+
+  it('reports a template skipped ONLY because of the plan limit as such, and imports nothing past the limit', async () => {
+    const t = uniq()
+    const planId = `qa-limit-${t}`
+    const current = await prisma.template.count({ where: { tenantId: tenantE.tenantId } })
+    const subscription = await prisma.subscription.findUniqueOrThrow({ where: { tenantId: tenantE.tenantId } })
+    await prisma.plan.create({ data: { id: planId, name: 'QA template limit', limits: { templates: current + 1 } } })
+    await prisma.subscription.update({ where: { tenantId: tenantE.tenantId }, data: { planId } })
+    const simple = (id: string, name: string) => ({
+      id, name, status: 'APPROVED', language: 'en_US', category: 'UTILITY', parameter_format: 'POSITIONAL',
+      components: [{ type: 'BODY', text: 'Plain text, no variables.' }],
+    })
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => json({ data: [simple('8001', `limit_a_${t}`), simple('8002', `limit_b_${t}`)] }))
+
+    try {
+      const result = await templatesService.syncFromMeta(tenantE.tenantId)
+      expect(result).toMatchObject({ synced: 0, imported: 1, skipped: 1, total: 2 })
+      expect(result.importedTemplates).toEqual([{ name: `limit_a_${t}`, language: 'en_US' }])
+      expect(result.skippedTemplates).toHaveLength(1)
+      expect(result.skippedTemplates[0]).toMatchObject({ name: `limit_b_${t}`, code: 'PLAN_LIMIT', planLimit: true, requiresVariables: false, isCarousel: false, hasMediaHeader: false, unsupported: false })
+      expect(await prisma.template.count({ where: { tenantId: tenantE.tenantId, name: `limit_b_${t}` } })).toBe(0)
+    } finally {
+      await prisma.subscription.update({ where: { tenantId: tenantE.tenantId }, data: { planId: subscription.planId } })
+      await prisma.plan.delete({ where: { id: planId } })
+    }
   })
 })

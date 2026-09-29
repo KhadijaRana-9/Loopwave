@@ -1,66 +1,58 @@
-import { useState } from 'react'
-import { CheckCircle2, Mail, MapPin, Phone } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { Mail, MapPin, Phone } from 'lucide-react'
 import Button from '@/components/ui/Button'
-import { Input, Textarea } from '@/components/ui/Input'
+import { Owner } from '@/components/legal/LegalPage'
+import { LEGAL } from '@/constants/legal'
 
+// Contact details come from src/constants/legal.js — the owner fills them in
+// once, and nothing here is invented. There is deliberately no message form:
+// no backend endpoint exists to receive one, and a form that only pretends to
+// send would be a fake success. Until an email address is configured this page
+// shows a marker in its place.
 export default function Contact() {
-  const [form, setForm] = useState({ name: '', email: '', message: '' })
-  const [submitted, setSubmitted] = useState(false)
-  const [sending, setSending] = useState(false)
-
-  function update(field) {
-    return (e) => setForm((f) => ({ ...f, [field]: e.target.value }))
-  }
-
-  function handleSubmit(e) {
-    e.preventDefault()
-    setSending(true)
-    // Demo only — no backend wired up yet. Replace with a real POST to your
-    // contact/lead endpoint.
-    setTimeout(() => {
-      setSending(false)
-      setSubmitted(true)
-    }, 600)
-  }
-
   return (
-    <div className="mx-auto max-w-5xl px-4 py-16 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-1 gap-12 lg:grid-cols-2">
-        <div>
-          <h1 className="text-3xl font-semibold text-ink-900">Talk to our team</h1>
-          <p className="mt-3 text-ink-500">Questions about pricing, migrations, or enterprise needs? We're happy to help.</p>
-          <div className="mt-8 space-y-4 text-sm text-ink-600">
-            <div className="flex items-center gap-3">
-              <Mail className="h-4 w-4 text-ink-400" /> hello@loopwavedemo.com
-            </div>
-            <div className="flex items-center gap-3">
-              <Phone className="h-4 w-4 text-ink-400" /> +91 98765 40000
-            </div>
-            <div className="flex items-center gap-3">
-              <MapPin className="h-4 w-4 text-ink-400" /> Bengaluru, India
-            </div>
-          </div>
-        </div>
+    <div className="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
+      <h1 className="text-3xl font-semibold text-ink-900">Talk to our team</h1>
+      <p className="mt-3 text-ink-500">Questions about pricing, migrations, or enterprise needs? We're happy to help.</p>
 
-        <div className="rounded-xl border border-ink-200 bg-white p-6">
-          {submitted ? (
-            <div className="flex flex-col items-center justify-center py-10 text-center">
-              <CheckCircle2 className="h-10 w-10 text-success-500" />
-              <h3 className="mt-3 text-sm font-semibold text-ink-900">Message sent</h3>
-              <p className="mt-1 text-sm text-ink-500">This is a demo form — no message was actually delivered.</p>
-            </div>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-              <Input label="Full name" value={form.name} onChange={update('name')} required />
-              <Input label="Email" type="email" value={form.email} onChange={update('email')} required />
-              <Textarea label="Message" value={form.message} onChange={update('message')} required />
-              <Button type="submit" loading={sending} className="mt-1 w-full justify-center">
-                Send message
-              </Button>
-            </form>
-          )}
+      <div className="mt-8 space-y-4 text-sm text-ink-600">
+        <div className="flex items-start gap-3">
+          <Mail className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+          <span>
+            <Owner field="contactEmail" label="contact email" />
+          </span>
+        </div>
+        <div className="flex items-start gap-3">
+          <Phone className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+          <span>
+            <Owner field="contactPhone" label="contact phone, or remove this line if you do not want to publish one" />
+          </span>
+        </div>
+        <div className="flex items-start gap-3">
+          <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
+          <span>
+            <Owner field="registeredAddress" label="business address" />
+          </span>
         </div>
       </div>
+
+      {LEGAL.contactEmail && (
+        <a href={`mailto:${LEGAL.contactEmail}`} className="mt-8 inline-block">
+          <Button>Email us</Button>
+        </a>
+      )}
+
+      <p className="mt-10 text-sm text-ink-500">
+        Privacy or data requests: see our{' '}
+        <Link to="/privacy" className="font-medium text-brand-600 hover:underline">
+          Privacy Policy
+        </Link>{' '}
+        and{' '}
+        <Link to="/data-deletion" className="font-medium text-brand-600 hover:underline">
+          Data Deletion
+        </Link>{' '}
+        page.
+      </p>
     </div>
   )
 }
