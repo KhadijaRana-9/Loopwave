@@ -1,0 +1,19 @@
+# Loopwave campaign/token-expiry worker — mirrors the Railway worker deploy:
+# `node dist/worker.js` only. No `prisma migrate deploy` here — the API
+# service owns applying migrations on boot; running it from two services at
+# once against the same database is unnecessary and racy.
+FROM node:24-alpine AS build
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM node:24-alpine AS runtime
+WORKDIR /app
+ENV NODE_ENV=production
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY --from=build /app/dist ./dist
+COPY --from=build /app/prisma ./prisma
+CMD ["npm", "run", "start:worker"]
