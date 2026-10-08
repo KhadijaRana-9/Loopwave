@@ -25,10 +25,16 @@ function waitForFbSdk() {
 
 let initializedAppId = null
 
+// Matches the server's WHATSAPP_API_VERSION default (server/src/config/env.ts)
+// and Meta's current Embedded Signup docs example. v21.0 (the previous value
+// here) is still within Meta's supported window, so this was not a functional
+// failure — just drifted from both the current docs and the server's own version.
+const FB_SDK_VERSION = 'v25.0'
+
 async function ensureInit(appId) {
   const FB = await waitForFbSdk()
   if (initializedAppId !== appId) {
-    FB.init({ appId, cookie: true, xfbml: false, version: 'v21.0' })
+    FB.init({ appId, cookie: true, xfbml: false, version: FB_SDK_VERSION })
     initializedAppId = appId
   }
   return FB
@@ -75,11 +81,19 @@ export async function runEmbeddedSignup({ appId, configId }) {
 
   try {
     const loginResponse = await new Promise((resolve) => {
+      // extras: {} matches Meta's current Embedded Signup v4 spec (the
+      // "Create from template" Facebook Login for Business configuration we
+      // use is itself v4 — selecting products on that template auto-sets
+      // v4). sessionInfoVersion was a v2-only parameter ("Partners are
+      // required to add a sessionInfoVersion to receive the callback"),
+      // removed in v3, and not part of v4's extras at all — sending it here
+      // was a stale v2-era value left over in this flow and doesn't match
+      // the config we actually use.
       FB.login(resolve, {
         config_id: configId,
         response_type: 'code',
         override_default_response_type: true,
-        extras: { setup: {}, sessionInfoVersion: '3' },
+        extras: { setup: {} },
       })
     })
 

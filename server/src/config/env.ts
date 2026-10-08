@@ -28,11 +28,22 @@ const envSchema = z.object({
   WHATSAPP_APP_SECRET: z.string().optional().default(''),
   WHATSAPP_API_VERSION: z.string().default('v21.0'),
 
+  // S3-compatible object storage (real AWS S3, Cloudflare R2, DigitalOcean
+  // Spaces, Backblaze B2 — see storage.adapter.ts). STORAGE_ENDPOINT is only
+  // for non-AWS providers; leave it unset for real AWS S3, where the SDK
+  // resolves the endpoint from the region itself.
   STORAGE_ENDPOINT: z.string().optional().default(''),
   STORAGE_REGION: z.string().optional().default(''),
   STORAGE_BUCKET: z.string().optional().default(''),
   STORAGE_ACCESS_KEY_ID: z.string().optional().default(''),
   STORAGE_SECRET_ACCESS_KEY: z.string().optional().default(''),
+  // Same credentials, AWS's own naming convention — accepted as a fallback
+  // (see storageConfig below) so a Railway service configured with the
+  // conventional AWS_* names works without renaming anything.
+  AWS_REGION: z.string().optional().default(''),
+  AWS_S3_BUCKET: z.string().optional().default(''),
+  AWS_ACCESS_KEY_ID: z.string().optional().default(''),
+  AWS_SECRET_ACCESS_KEY: z.string().optional().default(''),
 
   AI_PROVIDER: z.enum(['demo', 'openai']).default('demo'),
   OPENAI_API_KEY: z.string().optional().default(''),
@@ -61,6 +72,18 @@ export const env = parsed.data
 
 export const isProduction = env.NODE_ENV === 'production'
 
+// Resolved storage credentials: STORAGE_* takes precedence, AWS_* is the
+// fallback for the same values under AWS's naming convention. Endpoint has no
+// AWS_* equivalent — it only ever comes from STORAGE_ENDPOINT, and stays
+// empty for real AWS S3 (the SDK resolves the endpoint from the region).
+export const storageConfig = {
+  endpoint: env.STORAGE_ENDPOINT,
+  region: env.STORAGE_REGION || env.AWS_REGION,
+  bucket: env.STORAGE_BUCKET || env.AWS_S3_BUCKET,
+  accessKeyId: env.STORAGE_ACCESS_KEY_ID || env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: env.STORAGE_SECRET_ACCESS_KEY || env.AWS_SECRET_ACCESS_KEY,
+}
+
 // Integration readiness flags — the UI/API should reflect these honestly
 // rather than claiming a connection that was never established.
 export const integrationReadiness = {
@@ -69,7 +92,11 @@ export const integrationReadiness = {
   // Whether a *specific* tenant can actually send is a separate, per-tenant
   // question answered by WhatsAppAccount.accessTokenCipher — see whatsapp.service.ts.
   whatsappSignup: Boolean(env.META_APP_ID && env.META_CONFIG_ID && env.WHATSAPP_APP_SECRET),
-  storage: Boolean(env.STORAGE_ENDPOINT && env.STORAGE_BUCKET && env.STORAGE_ACCESS_KEY_ID && env.STORAGE_SECRET_ACCESS_KEY),
+  // Endpoint is deliberately NOT required here — it's only set for non-AWS
+  // S3-compatible providers. Requiring it would report a fully-configured
+  // real AWS S3 bucket (region + bucket + keys, no custom endpoint) as "not
+  // configured", which is wrong.
+  storage: Boolean(storageConfig.region && storageConfig.bucket && storageConfig.accessKeyId && storageConfig.secretAccessKey),
   ai: env.AI_PROVIDER === 'openai' && Boolean(env.OPENAI_API_KEY),
   stripe: Boolean(env.STRIPE_SECRET_KEY),
   email: env.EMAIL_PROVIDER === 'resend' && Boolean(env.RESEND_API_KEY),

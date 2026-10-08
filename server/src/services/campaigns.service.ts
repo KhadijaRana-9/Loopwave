@@ -244,7 +244,7 @@ export const campaignsService = {
       throw ApiError.badRequest('Connect a real WhatsApp number before uploading campaign header media')
     }
     if (!isStorageConfigured()) {
-      throw ApiError.badRequest('Media storage is not configured yet — set STORAGE_ENDPOINT/STORAGE_BUCKET/STORAGE_ACCESS_KEY_ID/STORAGE_SECRET_ACCESS_KEY.')
+      throw ApiError.badRequest('Media storage is not configured — set STORAGE_BUCKET, STORAGE_REGION, STORAGE_ACCESS_KEY_ID and STORAGE_SECRET_ACCESS_KEY (or the AWS_S3_BUCKET/AWS_REGION/AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY equivalents).')
     }
     const accessToken = decryptSecret(connected.account.accessTokenCipher)
 
